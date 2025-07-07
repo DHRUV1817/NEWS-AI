@@ -1,0 +1,339 @@
+# NewsNinja 2.0 - Git Ignore File
+
+# =============================================================================
+# ENVIRONMENT & SECRETS
+# =============================================================================
+.env
+.env.local
+.env.development
+.env.production
+*.key
+*_key*
+secrets/
+config/secrets/
+
+# API Keys (extra protection)
+*api_key*
+*token*
+*secret*
+
+# =============================================================================
+# PYTHON
+# =============================================================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+newsinja_env/
+newsninja-env/
+
+# =============================================================================
+# AUDIO FILES (Generated content)
+# =============================================================================
+audio/
+*.mp3
+*.wav
+*.m4a
+*.aac
+*.flac
+sounds/
+voice/
+tts_files/
+
+# Keep audio directory but ignore files
+!audio/.gitkeep
+
+# =============================================================================
+# CACHE & TEMPORARY FILES
+# =============================================================================
+cache.json
+*.cache
+.cache/
+temp/
+tmp/
+temporary/
+.temp/
+
+# Streamlit cache
+.streamlit/
+
+# =============================================================================
+# LOGS & MONITORING
+# =============================================================================
+logs/
+*.log
+*.log.*
+log_files/
+debug.log
+error.log
+access.log
+
+# =============================================================================
+# DATABASE FILES
+# =============================================================================
+*.db
+*.sqlite
+*.sqlite3
+database/
+db/
+
+# =============================================================================
+# JUPYTER NOTEBOOKS
+# =============================================================================
+.ipynb_checkpoints/
+*.ipynb
+notebooks/
+
+# =============================================================================
+# IDE & EDITOR FILES
+# =============================================================================
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Sublime Text
+*.sublime-*
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+
+# =============================================================================
+# OS GENERATED FILES
+# =============================================================================
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# =============================================================================
+# DEVELOPMENT & TESTING
+# =============================================================================
+# Testing
+test_results/
+test_output/
+coverage_reports/
+.coverage
+htmlcov/
+
+# Development files
+scratch/
+playground/
+experiments/
+dev_notes.txt
+todo.txt
+notes.md
+
+# Backup files
+*.bak
+*.backup
+backup/
+backups/
+
+# =============================================================================
+# DEPLOYMENT & CLOUD
+# =============================================================================
+# Docker
+Dockerfile.local
+docker-compose.override.yml
+.dockerignore
+
+# Cloud deployment
+.vercel/
+.netlify/
+.firebase/
+
+# Heroku
+.heroku/
+
+# AWS
+.aws/
+*.pem
+
+# =============================================================================
+# PACKAGE MANAGERS
+# =============================================================================
+# npm (if using any Node.js tools)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Pipenv
+Pipfile.lock
+
+# Poetry
+poetry.lock
+
+# =============================================================================
+# LARGE FILES & DATASETS
+# =============================================================================
+# Data files
+data/
+datasets/
+*.csv
+*.json
+*.xlsx
+*.parquet
+
+# Models (if any local models)
+models/
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.pth
+
+# Large media files
+*.mov
+*.avi
+*.mp4
+*.mkv
+*.webm
+
+# =============================================================================
+# STREAMLIT SPECIFIC
+# =============================================================================
+.streamlit/secrets.toml
+.streamlit/config.toml
+
+# =============================================================================
+# PROJECT SPECIFIC
+# =============================================================================
+# NewsNinja specific ignores
+news_cache/
+reddit_cache/
+analysis_results/
+user_data/
+session_data/
+
+# Configuration files with sensitive data
+config.ini
+settings.json
+local_config.py
+
+# =============================================================================
+# DOCUMENTATION (Optional - remove if you want to include)
+# =============================================================================
+# Uncomment if you don't want to include documentation
+# docs/build/
+# docs/_build/
+# *.pdf
+
+# =============================================================================
+# KEEP THESE FILES (Whitelist)
+# =============================================================================
+# Force include important files even if ignored above
+!requirements.txt
+!README.md
+!.gitkeep
+!.env.example
+!Pipfile
+!pyproject.toml
+!setup.py
