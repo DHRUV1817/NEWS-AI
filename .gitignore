@@ -336,4 +336,4 @@ local_config.py
 !.env.example
 !Pipfile
 !pyproject.toml
-!setup.py
+!setup.pystreamlit/secrets.toml
