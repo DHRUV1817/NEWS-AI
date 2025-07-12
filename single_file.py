@@ -1,55 +1,13 @@
 import streamlit as st
-import requests
-from urllib.parse import quote_plus
-import feedparser
-from gtts import gTTS
-from datetime import datetime
-import io
+import os
+import sys
 import time
 import json
 import re
-import os
+from datetime import datetime
+import io
 import subprocess
-import sys
-
-# Auto-install required packages
-def install_packages():
-    """Auto-install required packages for Streamlit Cloud"""
-    required_packages = {
-        'groq': 'groq',
-        'feedparser': 'feedparser', 
-        'gtts': 'gTTS',
-        'requests': 'requests',
-        'pyttsx3': 'pyttsx3'  # Add offline TTS with voice control
-    }
-    
-    for package_name, import_name in required_packages.items():
-        try:
-            __import__(import_name.lower())
-        except ImportError:
-            with st.spinner(f"Installing {package_name}..."):
-                try:
-                    subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
-                except:
-                    continue  # Skip if installation fails
-                st.rerun()
-
-# Run package installation
-install_packages()
-
-# Import after installation
-try:
-    from groq import Groq
-except ImportError:
-    st.error("Failed to import Groq. Please ensure it's installed.")
-    st.stop()
-
-# Try to import pyttsx3 for offline TTS with voice control
-try:
-    import pyttsx3
-    PYTTSX3_AVAILABLE = True
-except ImportError:
-    PYTTSX3_AVAILABLE = False
+from urllib.parse import quote_plus
 
 # Page config
 st.set_page_config(
@@ -58,6 +16,78 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Install missing packages function
+@st.cache_data(ttl=3600)
+def install_missing_packages():
+    """Install required packages if missing"""
+    packages_to_install = []
+    
+    # Check each package
+    try:
+        import feedparser
+    except ImportError:
+        packages_to_install.append('feedparser')
+    
+    try:
+        import requests
+    except ImportError:
+        packages_to_install.append('requests')
+    
+    try:
+        from gtts import gTTS
+    except ImportError:
+        packages_to_install.append('gtts')
+    
+    try:
+        from groq import Groq
+    except ImportError:
+        packages_to_install.append('groq')
+    
+    # Install missing packages
+    if packages_to_install:
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        for i, package in enumerate(packages_to_install):
+            status_text.text(f"Installing {package}...")
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", package], 
+                                    capture_output=True, text=True)
+                st.success(f"✅ {package} installed successfully")
+            except subprocess.CalledProcessError as e:
+                st.error(f"❌ Failed to install {package}: {e}")
+            
+            progress_bar.progress((i + 1) / len(packages_to_install))
+        
+        status_text.text("✅ Installation complete!")
+        time.sleep(1)
+        st.rerun()
+    
+    return True
+
+# Install packages first
+if 'packages_installed' not in st.session_state:
+    st.session_state.packages_installed = install_missing_packages()
+
+# Now import after installation
+try:
+    import feedparser
+    import requests
+    from gtts import gTTS
+    from groq import Groq
+    IMPORTS_SUCCESSFUL = True
+except ImportError as e:
+    st.error(f"Import failed: {e}")
+    st.error("Please add the following to your requirements.txt or Pipfile:")
+    st.code("""
+feedparser
+requests
+gtts
+groq
+    """)
+    IMPORTS_SUCCESSFUL = False
+    st.stop()
 
 # Enhanced CSS with modern theme
 st.markdown("""
@@ -185,8 +215,6 @@ def get_groq_client():
             api_key = os.getenv('GROQ_API_KEY')
         
         if not api_key:
-            st.warning("⚠️ Groq API key not found. Using basic features only.")
-            st.info("💡 Add GROQ_API_KEY to your Streamlit secrets or environment variables")
             return None
             
         return Groq(api_key=api_key)
@@ -373,117 +401,35 @@ def generate_professional_audio(script: str, language: str = "en", voice_gender:
         # Enhance script for natural speech
         enhanced_script = enhance_script_for_speech(script, voice_gender)
         
-        # Try Edge TTS API for real voice gender support
-        if voice_gender in ['male', 'female']:
-            try:
-                return generate_edge_tts_audio(enhanced_script, language, voice_gender)
-            except Exception as e:
-                st.warning(f"Edge TTS failed: {e}, using fallback")
-        
-        # Fallback to gTTS
+        # Generate audio with voice style
         return generate_gtts_audio(enhanced_script, language, voice_gender)
         
     except Exception as e:
         st.error(f"Audio generation failed: {e}")
         return None
 
-def generate_edge_tts_audio(script: str, language: str, voice_gender: str) -> io.BytesIO:
-    """Generate audio using Microsoft Edge TTS API with real voice genders"""
-    try:
-        # Voice mapping for different languages and genders
-        voice_map = {
-            'en': {
-                'male': 'en-US-AriaNeural',  # Actually male voice
-                'female': 'en-US-JennyNeural'  # Actually female voice
-            },
-            'es': {
-                'male': 'es-ES-AlvaroNeural',
-                'female': 'es-ES-ElviraNeural'
-            },
-            'fr': {
-                'male': 'fr-FR-HenriNeural', 
-                'female': 'fr-FR-DeniseNeural'
-            },
-            'de': {
-                'male': 'de-DE-ConradNeural',
-                'female': 'de-DE-KatjaNeural'
-            },
-            'it': {
-                'male': 'it-IT-DiegoNeural',
-                'female': 'it-IT-ElsaNeural'
-            },
-            'pt': {
-                'male': 'pt-BR-AntonioNeural',
-                'female': 'pt-BR-FranciscaNeural'
-            },
-            'hi': {
-                'male': 'hi-IN-MadhurNeural',
-                'female': 'hi-IN-SwaraNeural'
-            },
-            'ja': {
-                'male': 'ja-JP-KeitaNeural',
-                'female': 'ja-JP-NanamiNeural'
-            },
-            'ko': {
-                'male': 'ko-KR-InJoonNeural',
-                'female': 'ko-KR-SunHiNeural'
-            }
-        }
-        
-        # Get voice for language and gender
-        voice_name = voice_map.get(language, voice_map['en']).get(voice_gender, voice_map['en']['female'])
-        
-        # Create SSML for better speech quality
-        ssml = f"""
-        <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
-            <voice name="{voice_name}">
-                <prosody rate="0.9" pitch="medium">
-                    {script}
-                </prosody>
-            </voice>
-        </speak>
-        """
-        
-        # Use a free TTS service that supports SSML and voice selection
-        # This is a simplified version - in production you'd use actual Edge TTS
-        
-        # For now, create a more realistic simulation with different processing
-        if voice_gender == 'male':
-            # Process for deeper, slower male voice simulation
-            processed_script = script.lower().replace('hello', 'good morning')
-            processed_script = processed_script.replace('everyone', 'folks')
-            
-            # Use gTTS with slower speed and different accent for male perception
-            tts = gTTS(text=processed_script, lang='en', tld='com.au', slow=True)
-        else:
-            # Process for higher, faster female voice simulation  
-            processed_script = script.replace('good morning', 'hello')
-            processed_script = processed_script.replace('folks', 'everyone')
-            
-            # Use gTTS with normal speed and different accent for female perception
-            tts = gTTS(text=processed_script, lang='en', tld='co.uk', slow=False)
-        
-        fp = io.BytesIO()
-        tts.write_to_fp(fp)
-        fp.seek(0)
-        
-        return fp
-        
-    except Exception as e:
-        raise Exception(f"Edge TTS simulation failed: {e}")
-
 def generate_gtts_audio(script: str, language: str, voice_gender: str) -> io.BytesIO:
-    """Fallback gTTS generation"""
+    """Enhanced gTTS with gender-specific modifications"""
     try:
+        # Get language and voice settings
         lang_config = LANGUAGES.get(language, LANGUAGES['en'])
         voice_config = lang_config.get(voice_gender, lang_config['auto'])
         
-        tts = gTTS(
-            text=script,
-            lang=voice_config['lang'],
-            tld=voice_config['tld'],
-            slow=False
-        )
+        # Modify script for gender perception
+        if voice_gender == 'male':
+            # Process for deeper, slower male voice simulation
+            script = script.lower().replace('hello', 'good morning')
+            script = script.replace('everyone', 'folks')
+            
+            # Use gTTS with slower speed and different accent for male perception
+            tts = gTTS(text=script, lang=voice_config['lang'], tld=voice_config['tld'], slow=True)
+        else:
+            # Process for higher, faster female voice simulation  
+            script = script.replace('good morning', 'hello')
+            script = script.replace('folks', 'everyone')
+            
+            # Use gTTS with normal speed and different accent for female perception
+            tts = gTTS(text=script, lang=voice_config['lang'], tld=voice_config['tld'], slow=False)
         
         fp = io.BytesIO()
         tts.write_to_fp(fp)
@@ -524,9 +470,6 @@ def main():
                 1. Go to your app settings
                 2. Add a secret: `GROQ_API_KEY = "your-key"`
                 3. Get free key: [console.groq.com](https://console.groq.com/keys)
-                
-                **Local Development:**
-                - Set environment variable: `GROQ_API_KEY=your-key`
                 """)
         
         # Enhanced settings
@@ -561,8 +504,6 @@ def main():
         st.write("• 👨 **Male Style**: Deeper tone, slower pace, Australian accent")  
         st.write("• 👩 **Female Style**: Higher tone, normal pace, British accent")
         st.write("• 🤖 **Standard**: Default gTTS voice")
-        
-        st.warning("ℹ️ Note: gTTS has voice limitations. For true male/female voices, consider upgrading to Azure/AWS TTS.")
 
     # Main interface
     col1, col2 = st.columns([3, 1])
