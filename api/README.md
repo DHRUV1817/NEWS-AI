@@ -1,6 +1,7 @@
 # newsninja (core package)
 
-Turns a list of topics into a source-grounded news briefing with audio.
+Turns a list of topics into a source-grounded news briefing with audio, on
+Groq's free tier.
 
 ## Requirements
 
@@ -15,22 +16,62 @@ Python 3.12. The system Python on macOS is 3.9 and will not work — use `uv`.
 
     uv run --python 3.12 newsninja --topic "artificial intelligence" --topic "climate"
 
+Exit codes: `0` success, `1` missing or invalid configuration, `2` the model
+never returned schema-valid output, `3` the provider's rate limit was hit — the
+message says roughly how long to wait.
+
 ## Design notes
 
 **Structured output.** Extraction uses Groq's strict `json_schema` mode, which is
-supported only on `openai/gpt-oss-20b` and `openai/gpt-oss-120b`. Pydantic's schema
-output needs a transform first — see `analysis/schema.py`.
+supported only on `openai/gpt-oss-20b` and `openai/gpt-oss-120b`; `GroqClient`
+refuses any other model rather than quietly falling back to free-form text.
+Pydantic's schema output needs a transform first — see `analysis/schema.py`. A
+response that fails validation is retried with the validation error fed back to
+the model, and raises `ExtractionFailure` once the retry budget is spent.
 
-**Grounding.** Every `Claim` carries a `quote` that must appear verbatim in its source
-article, which makes hallucination a string containment check rather than a judgement.
+**Grounding.** The extraction prompt requires every `Claim` to carry a `quote`
+copied character-for-character from the supplied article text.
+`analysis/grounding.py` is what checks it: `grounding_rate` reports the fraction
+of quotes appearing verbatim in the concatenated sources, by exact substring
+containment — no normalisation, no fuzzy matching, no model in the loop. That is
+the sense in which hallucination here is a string containment check rather than
+a judgement.
 
-**Rate limits.** The free tier is tokens-per-minute limited. Work is spread across models
-(limits are per model) and articles are batched one call per topic rather than one per
-article. See `analysis/limiter.py`.
+What it does not mean: nothing rejects an ungrounded claim at runtime. The check
+is a measurement utility, deliberately outside the pipeline's control flow, and
+is what the eval harness will read.
 
-**Audio.** gTTS by default across twelve languages. Orpheus is an opt-in upgrade covering
-English and Saudi Arabic only, and requires accepting model terms at console.groq.com.
-Failures fall back to gTTS.
+**Rate limits.** The free tier is tokens-per-minute limited, per model, so work is
+spread across models — extraction on `gpt-oss-20b`, synthesis on `gpt-oss-120b`,
+translation on `llama-3.3-70b-versatile` — and articles are batched one call per
+topic rather than one per article. `analysis/limiter.py` holds a sliding
+sixty-second window per model: a call reserves an estimate that includes the
+completion tokens it expects to spend, then settles that reservation against the
+usage the provider actually reported, and the provider's own
+`x-ratelimit-remaining-tokens` header forces a wait when it disagrees with the
+local view. A model with no configured budget raises rather than skipping the
+limiter.
 
-**Reddit.** Requires a free script app at reddit.com/prefs/apps. Without credentials the
-source reports itself unavailable; the public JSON endpoint returns 403.
+**Audio.** gTTS by default, across twelve languages, returning MP3. Orpheus
+(`ENABLE_ORPHEUS=true`) is an opt-in upgrade covering English and Saudi Arabic
+only; it POSTs to Groq's `/openai/v1/audio/speech` endpoint and returns WAV.
+`--out` is written verbatim, so name the file for whichever backend you expect.
+
+Orpheus returns HTTP 400 `model_terms_required` until its terms are accepted at
+console.groq.com, so on a fresh account every Orpheus call fails and gTTS — the
+fallback — is the path that actually runs. Long scripts are chunked, and no
+chunk exceeds the limit even when the text carries no punctuation the splitter
+recognises.
+
+**Sources.** Google News RSS needs no authentication. Reddit requires a free
+script app at reddit.com/prefs/apps — the public JSON endpoint returns 403 — and
+without credentials the source reports itself unavailable, which the CLI prints
+as a skipped source, distinct from a failure. A source that is tried and fails
+has every failure recorded against its name and the run continues on what is
+left.
+
+## Not here yet
+
+No web UI, and no eval harness: `analysis/grounding.py` and the response cache
+exist to serve one, but it has not been written. No test in this package makes a
+network call.

@@ -1,7 +1,10 @@
 """Orchestration: topics in, briefing and audio out.
 
 Source failures are collected per source rather than aborting the run, so one
-dead source degrades the briefing instead of destroying it.
+dead source degrades the briefing instead of destroying it. Sources that report
+themselves unavailable are recorded separately: a missing credential is not a
+failure, but the user is still entitled to know the briefing was built from
+fewer sources than they asked for.
 """
 
 from __future__ import annotations
