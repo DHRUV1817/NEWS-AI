@@ -17,6 +17,14 @@ config/secrets/
 *token*
 *secret*
 
+# ...but *token* above is broad enough to swallow legitimate source files.
+# tokens.css is the design-system token file Hallmark emits; without these
+# negations the frontend would ship without its stylesheet.
+!*tokens.css
+!*tokens.ts
+!*tokens.json
+!tokens/
+
 # =============================================================================
 # PYTHON
 # =============================================================================
@@ -347,7 +355,8 @@ local_config.py
 !.env.example
 !Pipfile
 !pyproject.toml
-!setup.pystreamlit/secrets.toml
+!setup.py
+streamlit/secrets.toml
 
 # Agent skills (installed via npx skills)
 .agents/
