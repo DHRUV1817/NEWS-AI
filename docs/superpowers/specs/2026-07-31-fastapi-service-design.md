@@ -77,7 +77,7 @@ is only their composition. Splitting the API along that existing joint is not a 
 | --- | --- | --- |
 | `POST /analyze` | `extract_topic`, one topic | 1 LLM call, ~2.4k tokens |
 | `POST /brief` | `build_briefing` over supplied analyses | 1–2 LLM calls |
-| `POST /audio` | `default_tts` on a supplied script | no LLM call |
+| `POST /audio` | `default_speech` on a supplied script | no LLM call |
 | `GET /health` | — | — |
 
 The client makes N `/analyze` calls, then one `/brief`, then one `/audio`. Every request
