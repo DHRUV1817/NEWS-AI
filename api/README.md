@@ -166,8 +166,16 @@ set would be silently spoken in English, so it is refused instead.
 | --- | --- |
 | invalid request body | 422 |
 | token budget exhausted | 429, with `Retry-After` |
-| a source failed | 502 |
+| a source failed | 200, reported in `source_errors`; the briefing is degraded, not failed |
 | the model would not produce valid output | 502 |
+
+A source failing does not fail the request: `/analyze` catches `SourceError`
+per source and still returns its `ArticleAnalysis`, with the broken sources
+named in `source_errors` — even when every source fails, the response is a 200
+with an empty analysis rather than an error. A `502` handler for `SourceError`
+is still registered at the application level, but nothing on the `/analyze`
+path can currently raise one past that per-source catch, so a caller of this
+API will not see it.
 
 Every failure uses one envelope, including an invalid request body:
 
