@@ -13,3 +13,5 @@ def load(name: str) -> str:
 
 
 EXTRACT_SYSTEM = load("extract")
+SYNTHESIZE_SYSTEM = load("synthesize")
+TRANSLATE_SYSTEM = load("translate")

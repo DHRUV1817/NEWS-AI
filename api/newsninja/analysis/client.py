@@ -62,6 +62,17 @@ class StructuredClient(Protocol):
     ) -> T: ...
 
 
+class TextClient(Protocol):
+    """Structural seam for callers that only need free-form ``text()``.
+
+    Satisfied by ``GroqClient`` and by test stubs without either needing to
+    subclass this — it's a ``Protocol``, matched structurally, not a nominal
+    base class.
+    """
+
+    def text(self, *, model: str, system: str, user: str) -> str: ...
+
+
 def _rate_limit_retry_after(exc: Exception) -> float:
     """Extract ``retry-after`` (seconds) from a Groq SDK rate-limit exception.
 
