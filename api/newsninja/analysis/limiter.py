@@ -60,27 +60,37 @@ class TokenBudgetLimiter:
         with self._lock:
             return self._used(self._clock())
 
-    def _wait_or_refuse(self, wait: float, max_wait: float | None) -> None:
-        """Sleep for ``wait``, unless a ceiling says the caller cannot afford it.
+    def _wait_or_refuse(self, wait: float, deadline: float | None) -> None:
+        """Sleep for ``wait``, unless the caller's deadline forbids it.
 
-        ``retry_after`` carries the wait that was declined rather than the
-        ceiling: the caller needs to know when the budget actually frees, not
-        how long this particular caller was willing to hold on.
+        The deadline is fixed once, at ``reserve`` entry, so what it bounds is
+        the *total* time spent inside one call. Comparing each sleep against the
+        ceiling separately bounded nothing: a reservation that has to retire six
+        window events sleeps six times, and six waits of 2.0s are each under a
+        5.0s ceiling while summing to 12.0s inside a single call.
+
+        ``retry_after`` carries the wait that was declined rather than the time
+        left on the deadline: the caller needs to know when the budget actually
+        frees, not how long this particular caller was willing to hold on.
         """
-        if max_wait is not None and wait > max_wait:
-            raise RateLimitError(
-                f"the token budget needs {wait:.1f}s to clear, which exceeds "
-                f"this caller's {max_wait:.1f}s ceiling",
-                retry_after=wait,
-            )
+        if deadline is not None:
+            remaining = deadline - self._clock()
+            if wait > remaining:
+                raise RateLimitError(
+                    f"the token budget needs {wait:.1f}s to clear, which exceeds "
+                    f"the {max(0.0, remaining):.1f}s this caller has left of its "
+                    f"wait ceiling",
+                    retry_after=wait,
+                )
         self._sleep(wait)
 
     def reserve(self, estimated_tokens: int, max_wait: float | None = None) -> int:
         """Block until ``estimated_tokens`` fits inside the budget, then book it.
 
-        With ``max_wait`` set, a wait longer than the ceiling raises
-        ``RateLimitError`` instead of sleeping. Callers that can afford to wait
-        — the CLI, the eval harness — pass nothing and behave as before.
+        ``max_wait`` bounds the whole call, not each individual sleep: a
+        deadline is fixed on entry and a wait that would carry the call past it
+        raises ``RateLimitError`` instead of sleeping. Callers that can afford to
+        wait — the CLI, the eval harness — pass nothing and behave as before.
 
         Returns a reservation id to hand to ``settle`` once the real cost of the
         call is known.
@@ -90,6 +100,8 @@ class TokenBudgetLimiter:
                 f"reservation of {estimated_tokens} exceeds the entire "
                 f"per-minute budget of {self._tpm}; split the request"
             )
+
+        deadline = None if max_wait is None else self._clock() + max_wait
 
         while True:
             with self._lock:
@@ -110,7 +122,7 @@ class TokenBudgetLimiter:
 
             # Outside the lock on purpose — see the module docstring — so the
             # window is re-read from scratch on the next pass.
-            self._wait_or_refuse(wait, max_wait)
+            self._wait_or_refuse(wait, deadline)
 
     def settle(self, reservation: int, actual_tokens: int) -> None:
         """Replace a reservation's estimate with the call's real total usage.

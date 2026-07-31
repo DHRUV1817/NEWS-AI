@@ -143,6 +143,50 @@ def test_bounded_reserve_also_bounds_the_forced_wait_path():
     assert clock.slept == []
 
 
+def test_the_wait_ceiling_bounds_the_whole_call_not_each_sleep():
+    """Verified failure: this slept [2.0] * 6 — 12.0s under a 5.0s ceiling.
+
+    A reservation that has to retire several window events sleeps once per
+    event. Checking each sleep against the ceiling separately bounds nothing:
+    every one of those six waits was inside 5.0s. §10.1 of the spec promises at
+    most `api_max_wait_seconds` of limiter wait per call, so the ceiling has to
+    be a deadline fixed on entry.
+    """
+    limiter, clock = _limiter(tpm=8000)
+    for _ in range(20):
+        limiter.reserve(400)
+        clock.now += 2.0
+    # 8,000 booked at t=0,2,...,38. From t=58 the oldest expires in 2.0s and
+    # each further event 2.0s after that, so freeing the 2,400 this reservation
+    # needs means retiring six events: six separate 2.0s sleeps.
+    clock.now = 58.0
+    assert limiter.used_tokens() == 8000
+
+    with pytest.raises(RateLimitError) as caught:
+        limiter.reserve(2400, max_wait=5.0)
+
+    assert sum(clock.slept) <= 5.0, (
+        f"slept {clock.slept} — {sum(clock.slept)}s total under a 5.0s ceiling"
+    )
+    assert clock.slept == [pytest.approx(2.0), pytest.approx(2.0)]
+    # The wait that was declined, not what was left of the ceiling: the caller
+    # needs to know when the budget frees.
+    assert caught.value.retry_after == pytest.approx(2.0)
+
+
+def test_an_unbounded_reserve_still_waits_as_long_as_it_takes():
+    """The CLI and the eval harness pass no ceiling and must not be refused."""
+    limiter, clock = _limiter(tpm=8000)
+    for _ in range(20):
+        limiter.reserve(400)
+        clock.now += 2.0
+    clock.now = 58.0
+
+    limiter.reserve(2400)
+    assert sum(clock.slept) == pytest.approx(12.0)
+    assert limiter.used_tokens() <= 8000
+
+
 # --- concurrency ---
 #
 # One limiter is shared: get_client is a process singleton and every handler is
