@@ -70,8 +70,45 @@ as a skipped source, distinct from a failure. A source that is tried and fails
 has every failure recorded against its name and the run continues on what is
 left.
 
+## Evaluation
+
+`api/evals/` measures the extraction pipeline, split into three families that
+are reported separately because they carry different epistemic weight:
+
+- **Deterministic** (`evals/metrics.py`) — schema validity, quote-grounding
+  rate, and ungrounded-claim rate. Pure arithmetic over the model's output and
+  its source articles; no model judges any of it, and a metric that cannot be
+  computed is `None`, never `0.0`.
+- **Agreement** (`evals/agreement.py`) — entity precision/recall/F1 and stance
+  accuracy plus Cohen's kappa, scored against the golden set. Kappa is
+  reported alongside accuracy because it discounts the agreement you would get
+  by chance.
+- **Judged** (`evals/judge.py`) — a rubric score (coverage, neutrality,
+  coherence, 1-5) from one Groq model grading another model's summary. This is
+  the least objective family and is presented as one model's opinion, not
+  ground truth.
+
+The golden set (`evals/data/golden.jsonl`) is model-drafted and
+human-corrected: `python -m evals.bootstrap` drafts candidate labels with
+`gpt-oss-120b` for a human to review and correct, but every drafted label
+starts `reviewed: false` and is invisible to the agreement metrics until a
+human sets `reviewed: true`. Presenting an unreviewed, model-drafted label as
+ground truth would make the agreement numbers circular.
+
+Commands, run from `api/`:
+
+```bash
+python -m evals.capture           # fetch and commit a stable article corpus
+python -m evals.bootstrap         # draft golden labels for human correction
+python -m evals.run --report      # run all three metric families, write docs/evals/latest.md
+```
+
+All three are human-invoked and not part of CI; `evals.run` makes real Groq
+API calls against the free tier and is rate-limited by the same limiter
+production uses.
+
 ## Not here yet
 
-No web UI, and no eval harness: `analysis/grounding.py` and the response cache
-exist to serve one, but it has not been written. No test in this package makes a
-network call.
+No web UI. `api/evals/` (above) covers extraction quality; there is no
+evaluation of synthesis, translation, or audio output yet. No test in this
+package makes a network call.
