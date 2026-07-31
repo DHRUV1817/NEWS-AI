@@ -18,19 +18,22 @@ def test_health_reports_ok_and_the_package_version(client):
     assert body["version"]
 
 
-def test_health_never_calls_the_model(client, monkeypatch):
+def test_health_never_calls_the_model(api_app, client, monkeypatch):
     """/health must not construct or call the model client.
 
-    Patching the function rather than registering a FastAPI dependency
-    override is what makes this discriminate: /health declares no
-    dependencies, so an override is never consulted, and the test would pass
-    even if the handler called get_client() directly.
+    Both mechanisms are needed and neither is redundant. A dependency
+    override is consulted per request and catches a Depends(get_client)
+    added to the signature, but never fires for a handler that declares no
+    dependencies. Patching the module attribute catches a direct call in the
+    handler body, but cannot rewire a Depends already bound to the function
+    object at import. Each covers the shape the other misses.
     """
     from newsninja.api import deps, routes
 
     def _explode(*args, **kwargs):
         raise AssertionError("/health must not build or call the model client")
 
+    api_app.dependency_overrides[get_client] = _explode
     monkeypatch.setattr(deps, "get_client", _explode)
     monkeypatch.setattr(routes, "get_client", _explode, raising=False)
 
