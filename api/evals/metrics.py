@@ -28,10 +28,18 @@ class ExtractionResult(BaseModel):
 
 @dataclass
 class DeterministicMetrics:
+    """Label-free metrics aggregated across extraction results.
+
+    ``ungrounded_claim_rate`` measures quote-absence only: a claim whose
+    ``text`` is fabricated but whose ``quote`` happens to be a real substring
+    of the corpus still counts as grounded here. It is not a general
+    hallucination detector — it is precisely ``1 - grounding_rate``.
+    """
+
     topics_evaluated: int
     schema_valid_rate: float | None
     grounding_rate: float | None
-    hallucinated_claim_rate: float | None
+    ungrounded_claim_rate: float | None
     mean_claims_per_topic: float | None
     mean_entities_per_topic: float | None
 
@@ -59,14 +67,18 @@ def deterministic_metrics(results: list[ExtractionResult]) -> DeterministicMetri
         total_ungrounded += len(ungrounded_claims(analysis, result.articles))
         total_entities += len(analysis.entities)
 
-    grounding = None if total_claims == 0 else 1.0 - (total_ungrounded / total_claims)
-    hallucinated = None if total_claims == 0 else total_ungrounded / total_claims
+    # Use the same (total - ungrounded) / total shape as
+    # newsninja.analysis.grounding.grounding_rate so a per-topic rate and this
+    # aggregate agree exactly on identical data, rather than differing in the
+    # last bit from an algebraically-equivalent but not bit-identical formula.
+    grounded = None if total_claims == 0 else (total_claims - total_ungrounded) / total_claims
+    ungrounded = None if total_claims == 0 else total_ungrounded / total_claims
 
     return DeterministicMetrics(
         topics_evaluated=len(results),
         schema_valid_rate=schema_valid_rate,
-        grounding_rate=grounding,
-        hallucinated_claim_rate=hallucinated,
+        grounding_rate=grounded,
+        ungrounded_claim_rate=ungrounded,
         mean_claims_per_topic=total_claims / len(succeeded),
         mean_entities_per_topic=total_entities / len(succeeded),
     )
