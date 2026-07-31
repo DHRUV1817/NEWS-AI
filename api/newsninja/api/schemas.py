@@ -5,7 +5,9 @@ LLM output schema, and letting HTTP concerns leak into them would couple the
 wire format to the thing being measured.
 """
 
-from pydantic import BaseModel, Field, field_validator
+from typing import Self
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from newsninja.models import ArticleAnalysis, Briefing
 from newsninja.pipeline import MAX_TOPICS
@@ -17,6 +19,38 @@ LANGUAGE_PATTERN = r"^[a-z]{2}(-[A-Za-z]{2})?$"
 #: chunk, so an uncapped script is an amplification vector: 1 MB of text becomes
 #: roughly 350 requests leaving the host.
 MAX_SCRIPT_CHARS = 20_000
+
+#: Total caller-supplied text one /brief request may carry across all its
+#: analyses. Bounding the count without bounding the size bounds nothing:
+#: measured, four analyses with 6,000-character summaries reserve 7,737 of
+#: gpt-oss-120b's 8,000 TPM — 97% of the shared minute, from one unauthenticated
+#: request carrying analyses the server never produced. The per-IP window is no
+#: help there: one request a minute holds the whole budget at zero.
+#:
+#: GroqClient estimates four characters per token and adds
+#: EXPECTED_COMPLETION_TOKENS on top, so 8,000 characters reserves roughly
+#: 8000/4 + 1500 = 3,500 tokens — under half the minute, which leaves a second
+#: caller served rather than 429ed. It is also generous against what /analyze
+#: actually produces: 1,600 characters per analysis at the five-analysis
+#: maximum. test_a_maximal_brief_request_reserves_under_half_the_budget pins
+#: the arithmetic so this comment cannot drift away from the code.
+MAX_BRIEF_CHARS = 8_000
+
+
+def _text_chars(analysis: ArticleAnalysis) -> int:
+    """Free text in one analysis — every field the caller writes.
+
+    Wider than what reaches the synthesis prompt (which renders topic, summary,
+    entity names and claim texts, but not quotes) on purpose: the quote is still
+    caller-supplied text the server holds in memory, and a bound that covers
+    less than the request does not bound the request.
+    """
+    return (
+        len(analysis.topic)
+        + len(analysis.summary)
+        + sum(len(entity.name) for entity in analysis.entities)
+        + sum(len(claim.text) + len(claim.quote) for claim in analysis.key_claims)
+    )
 
 
 class AnalyzeRequest(BaseModel):
@@ -45,6 +79,17 @@ class AnalyzeResponse(BaseModel):
 class BriefRequest(BaseModel):
     analyses: list[ArticleAnalysis] = Field(min_length=1, max_length=MAX_TOPICS)
     language: str = Field(default="en", pattern=LANGUAGE_PATTERN)
+
+    @model_validator(mode="after")
+    def _bound_the_total_text(self) -> Self:
+        """The count bound is per-request; this is the size bound behind it."""
+        total = sum(_text_chars(analysis) for analysis in self.analyses)
+        if total > MAX_BRIEF_CHARS:
+            raise ValueError(
+                f"analyses carry {total} characters of text; at most "
+                f"{MAX_BRIEF_CHARS} are accepted across one request"
+            )
+        return self
 
 
 class BriefResponse(BaseModel):
