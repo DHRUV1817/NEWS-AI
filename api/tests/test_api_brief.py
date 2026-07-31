@@ -9,7 +9,9 @@ from newsninja.analysis.synthesize import (
     build_briefing,
 )
 from newsninja.api.deps import get_client
-from newsninja.api.schemas import MAX_BRIEF_CHARS, BriefRequest
+from newsninja.api.schemas import MAX_BRIEF_CHARS, AnalyzeResponse, BriefRequest
+from newsninja.audio.tts import SUPPORTED_LANGUAGES
+from newsninja.models import ArticleAnalysis
 from newsninja.pipeline import MAX_TOPICS
 
 
@@ -180,3 +182,41 @@ def test_exactly_five_analyses_are_accepted(client):
     assert response.json()["briefing"]["topics"] == [
         f"t{n}" for n in range(MAX_TOPICS)
     ]
+
+
+@pytest.mark.parametrize("language", ["sv", "nl", "pl", "en-GB"])
+def test_a_language_the_pipeline_cannot_speak_is_refused(client, language):
+    """Shape-valid but unsupported.
+
+    synthesize_speech rewrites anything outside SUPPORTED_LANGUAGES to "en"
+    without saying so, so accepting "sv" means returning a Swedish script that
+    /audio then speaks in English, with nothing in either response saying it
+    happened. 422 is the only answer that does not mislead.
+    """
+    payload = {"analyses": [_analysis()], "language": language}
+    assert client.post("/brief", json=payload).status_code == 422
+
+
+@pytest.mark.parametrize("language", SUPPORTED_LANGUAGES)
+def test_every_supported_language_is_accepted(client, language):
+    """The refusal must not overshoot what the pipeline can actually do."""
+    payload = {"analyses": [_analysis()], "language": language}
+    response = client.post("/brief", json=payload)
+    assert response.status_code == 200
+    assert response.json()["briefing"]["language"] == language
+
+
+def test_an_analyze_response_is_not_itself_a_brief_analysis(client):
+    """The caller plucks `.analysis`; the response object whole is a 422.
+
+    The spec used to say `analyses` holds objects "in the same shape /analyze
+    returns", which would have sent a reader straight into a 422. Built from
+    AnalyzeResponse rather than a literal so it cannot drift from that schema.
+    """
+    whole = AnalyzeResponse(
+        analysis=ArticleAnalysis.model_validate(_analysis())
+    ).model_dump(mode="json")
+
+    assert client.post("/brief", json={"analyses": [whole]}).status_code == 422
+    plucked = {"analyses": [whole["analysis"]]}
+    assert client.post("/brief", json=plucked).status_code == 200
