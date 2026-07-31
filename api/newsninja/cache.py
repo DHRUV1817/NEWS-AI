@@ -1,8 +1,9 @@
 """SQLite response cache.
 
-Keyed on the full call identity — topic, source, model, and prompt version —
-so changing a prompt invalidates exactly the affected entries. Without this the
-eval suite would exhaust the free tier on every CI run.
+Keyed on the full call identity — topic, contributing sources, model, and prompt
+version — so changing a prompt invalidates exactly the affected entries. Without
+it, repeated runs of the same topics would spend the free tier over again; the
+eval harness this is being built toward would exhaust it on every CI run.
 """
 
 import hashlib

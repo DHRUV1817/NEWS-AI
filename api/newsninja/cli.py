@@ -1,7 +1,7 @@
 """Command-line entry point.
 
-Makes the whole pipeline runnable without a web server, which is what lets the
-eval harness and CI exercise it directly.
+Makes the whole pipeline runnable without a web server, which is what lets CI —
+and the eval harness this is being built toward — exercise it directly.
 """
 
 import argparse
