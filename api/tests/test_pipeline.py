@@ -79,6 +79,61 @@ def test_unavailable_sources_are_skipped_without_error():
     assert result.source_errors == {}
 
 
+def test_default_audio_path_wires_orpheus_when_enabled_and_keyed(monkeypatch):
+    """Regression: `enable_orpheus=True` used to yield gTTS silently.
+
+    ``run_pipeline``'s own speech seam is exercised — no ``tts`` argument — so
+    this fails if the default path never passes an ``orpheus_fn``.
+    """
+    import newsninja.pipeline as pipeline_module
+
+    captured: dict = {}
+    sentinel = object()
+
+    def fake_make_orpheus_fn(api_key, post=None):
+        captured["api_key"] = api_key
+        return sentinel
+
+    def fake_synthesize_speech(text, language, enable_orpheus, orpheus_fn=None):
+        captured["orpheus_fn"] = orpheus_fn
+        return b"AUDIO"
+
+    monkeypatch.setattr(pipeline_module, "make_orpheus_fn", fake_make_orpheus_fn)
+    monkeypatch.setattr(pipeline_module, "synthesize_speech", fake_synthesize_speech)
+
+    run_pipeline(
+        topics=["ai"],
+        sources=[FakeSource("google_news", [_article()])],
+        client=FakeClient(),
+        enable_orpheus=True,
+        api_key="sk-test",
+    )
+
+    assert captured["api_key"] == "sk-test"
+    assert captured["orpheus_fn"] is sentinel
+
+
+def test_default_audio_path_skips_orpheus_without_a_key(monkeypatch):
+    import newsninja.pipeline as pipeline_module
+
+    captured: dict = {}
+
+    def fake_synthesize_speech(text, language, enable_orpheus, orpheus_fn=None):
+        captured["orpheus_fn"] = orpheus_fn
+        return b"AUDIO"
+
+    monkeypatch.setattr(pipeline_module, "synthesize_speech", fake_synthesize_speech)
+
+    run_pipeline(
+        topics=["ai"],
+        sources=[FakeSource("google_news", [_article()])],
+        client=FakeClient(),
+        enable_orpheus=True,
+    )
+
+    assert captured["orpheus_fn"] is None
+
+
 def test_empty_topics_raises():
     with pytest.raises(ValueError):
         run_pipeline(topics=[], sources=[], client=FakeClient(), tts=_tts)

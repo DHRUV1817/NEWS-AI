@@ -56,8 +56,6 @@ def main(argv: list[str] | None = None) -> int:
         ),
     ]
 
-    # `tts` must be omitted rather than passed as None, or it would override
-    # run_pipeline's default with None and crash on call.
     pipeline_kwargs: dict[str, Any] = {
         "topics": args.topic,
         "sources": sources,
@@ -65,6 +63,9 @@ def main(argv: list[str] | None = None) -> int:
         "cache": None if args.no_cache else Cache(settings.cache_path),
         "language": args.language,
         "enable_orpheus": settings.enable_orpheus,
+        # Orpheus is a separate REST endpoint, so the key has to reach the
+        # speech seam as well as the chat client.
+        "api_key": settings.groq_api_key,
     }
     if args.no_audio:
         pipeline_kwargs["tts"] = lambda text, lang, orpheus: b""
