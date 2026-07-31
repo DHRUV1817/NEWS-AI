@@ -27,6 +27,7 @@ from newsninja.api.schemas import (
     BriefResponse,
     HealthResponse,
 )
+from newsninja.audio.tts import SpokenAudio
 from newsninja.cache import Cache
 from newsninja.config import Settings, get_settings
 from newsninja.pipeline import analyze_topic
@@ -86,15 +87,16 @@ def brief(
 @router.post("/audio")
 def audio(
     payload: AudioRequest,
-    tts: Annotated[Callable[[str, str, bool], bytes], Depends(get_tts)],
+    tts: Annotated[Callable[[str, str, bool], SpokenAudio], Depends(get_tts)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> Response:
     """Render a supplied script to speech.
 
-    Returns raw bytes rather than JSON. The media type follows the configured
-    engine because synthesize_speech returns mp3 from gTTS and wav from
-    Orpheus; a constant header would misdescribe one of them.
+    Returns raw bytes rather than JSON, with the media type the speech seam
+    reports for the bytes it produced. Choosing it from ENABLE_ORPHEUS instead
+    would be a guess: every Orpheus failure falls back to gTTS, which returns
+    mp3, and on an account that has not accepted the model terms that fallback
+    is the live path — so the header would say audio/wav over mp3 bytes.
     """
     spoken = tts(payload.script, payload.language, settings.enable_orpheus)
-    media_type = "audio/wav" if settings.enable_orpheus else "audio/mpeg"
-    return Response(content=spoken, media_type=media_type)
+    return Response(content=spoken.data, media_type=spoken.media_type)

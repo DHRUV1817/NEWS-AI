@@ -12,7 +12,27 @@ import io
 import re
 import wave
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NamedTuple
+
+#: gTTS returns mp3, Orpheus returns wav. Which one ran is not decidable from
+#: configuration — see ``SpokenAudio``.
+MP3_MEDIA_TYPE = "audio/mpeg"
+WAV_MEDIA_TYPE = "audio/wav"
+
+
+class SpokenAudio(NamedTuple):
+    """Rendered speech together with the media type of the bytes produced.
+
+    The two travel as one value because the engine that ran is not the engine
+    that was asked for: every Orpheus failure falls back to gTTS, and on an
+    account that has not accepted the model terms that fallback is the live
+    path. A caller choosing a header from its own configuration would then label
+    mp3 bytes ``audio/wav``.
+    """
+
+    data: bytes
+    media_type: str
+
 
 SUPPORTED_LANGUAGES: tuple[str, ...] = (
     "en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh", "hi", "ar",
@@ -212,14 +232,20 @@ def make_orpheus_fn(
     return _orpheus_fn
 
 
-def synthesize_speech(
+def render_speech(
     text: str,
     language: str = "en",
     enable_orpheus: bool = False,
     gtts_factory: Callable[..., Any] | None = None,
     orpheus_fn: Callable[[str, str], bytes] | None = None,
-) -> bytes:
-    """Render ``text`` to audio bytes, routing by language and availability."""
+) -> SpokenAudio:
+    """Render ``text`` to audio, reporting which format actually came out.
+
+    Routing by language and availability is one thing; describing the result is
+    another, and only this function knows both. ``enable_orpheus=True`` does not
+    mean wav: the fallback below is silent by design and, on an account without
+    accepted terms, is the path that always runs.
+    """
     if language not in SUPPORTED_LANGUAGES:
         language = "en"
 
@@ -227,7 +253,7 @@ def synthesize_speech(
 
     if enable_orpheus and language in ORPHEUS_LANGUAGES and orpheus_fn is not None:
         try:
-            return orpheus_fn(text, language)
+            return SpokenAudio(orpheus_fn(text, language), WAV_MEDIA_TYPE)
         except Exception:  # noqa: BLE001, S110
             # Terms not accepted (400 model_terms_required), or the model is
             # otherwise unavailable. This is the designed fallback, not an
@@ -235,4 +261,22 @@ def synthesize_speech(
             # silently rather than surface a broken feature.
             pass
 
-    return _gtts_bytes(text, language, factory)
+    return SpokenAudio(_gtts_bytes(text, language, factory), MP3_MEDIA_TYPE)
+
+
+def synthesize_speech(
+    text: str,
+    language: str = "en",
+    enable_orpheus: bool = False,
+    gtts_factory: Callable[..., Any] | None = None,
+    orpheus_fn: Callable[[str, str], bytes] | None = None,
+) -> bytes:
+    """Render ``text`` to audio bytes, routing by language and availability.
+
+    Bytes only, for callers that write them to a file the user named. A caller
+    that has to *describe* the bytes — the HTTP layer setting a Content-Type —
+    wants ``render_speech`` instead.
+    """
+    return render_speech(
+        text, language, enable_orpheus, gtts_factory, orpheus_fn
+    ).data

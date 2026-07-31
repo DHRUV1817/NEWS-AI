@@ -11,9 +11,10 @@ from collections.abc import Callable
 from functools import lru_cache
 
 from newsninja.analysis.client import GroqClient
+from newsninja.audio.tts import SpokenAudio
 from newsninja.cache import Cache
 from newsninja.config import get_settings
-from newsninja.pipeline import default_tts
+from newsninja.pipeline import default_speech
 from newsninja.sources.base import Source
 from newsninja.sources.google_news import GoogleNewsSource
 from newsninja.sources.reddit import RedditSource
@@ -47,7 +48,9 @@ def get_sources() -> list[Source]:
 
 
 @lru_cache(maxsize=1)
-def get_tts() -> Callable[[str, str, bool], bytes]:
+def get_tts() -> Callable[[str, str, bool], SpokenAudio]:
     # Orpheus is a separate REST endpoint rather than part of the chat client,
-    # so the key has to reach the speech seam too.
-    return default_tts(get_settings().groq_api_key)
+    # so the key has to reach the speech seam too. The seam reports the format
+    # it produced because the fallback to gTTS is silent: /audio's Content-Type
+    # has to follow the bytes rather than the request.
+    return default_speech(get_settings().groq_api_key)

@@ -16,7 +16,12 @@ from typing import TYPE_CHECKING, Protocol
 from newsninja.analysis.client import StructuredClient, TextClient
 from newsninja.analysis.extract import extract_topic
 from newsninja.analysis.synthesize import build_briefing
-from newsninja.audio.tts import make_orpheus_fn, synthesize_speech
+from newsninja.audio.tts import (
+    SpokenAudio,
+    make_orpheus_fn,
+    render_speech,
+    synthesize_speech,
+)
 from newsninja.cache import Cache
 from newsninja.errors import SourceError
 from newsninja.models import Article, ArticleAnalysis, Briefing
@@ -49,27 +54,53 @@ class PipelineResult:
     skipped_sources: list[str] = field(default_factory=list)
 
 
+def _orpheus_seam(
+    api_key: str | None, enable_orpheus: bool
+) -> Callable[[str, str], bytes] | None:
+    """Wire Orpheus only when it can actually run.
+
+    Orpheus needs a Groq key of its own — it is a separate REST endpoint, not
+    part of the chat client — so without one the branch is not wired at all and
+    gTTS handles every language.
+    """
+    return make_orpheus_fn(api_key) if enable_orpheus and api_key else None
+
+
 def default_tts(api_key: str | None = None) -> Callable[[str, str, bool], bytes]:
     """Build the speech seam ``run_pipeline`` uses when none is injected.
 
-    Orpheus needs a Groq key of its own — it is a separate REST endpoint, not
-    part of the chat client — so without one the Orpheus branch is not wired at
-    all and gTTS handles every language. With one, Orpheus is reached for the
-    languages it covers and still falls back to gTTS on any failure.
+    Bytes only: the CLI writes them to the path the user named. A caller that
+    must describe the bytes wants ``default_speech``.
     """
 
     def _tts(text: str, language: str, enable_orpheus: bool) -> bytes:
-        orpheus_fn = (
-            make_orpheus_fn(api_key) if enable_orpheus and api_key else None
-        )
         return synthesize_speech(
             text,
             language=language,
             enable_orpheus=enable_orpheus,
-            orpheus_fn=orpheus_fn,
+            orpheus_fn=_orpheus_seam(api_key, enable_orpheus),
         )
 
     return _tts
+
+
+def default_speech(api_key: str | None = None) -> Callable[[str, str, bool], SpokenAudio]:
+    """The same seam, reporting the format it produced alongside the bytes.
+
+    The HTTP layer uses this one. ``enable_orpheus=True`` does not imply wav —
+    every Orpheus failure falls back to gTTS — so a Content-Type chosen from
+    configuration would label mp3 bytes ``audio/wav``.
+    """
+
+    def _speech(text: str, language: str, enable_orpheus: bool) -> SpokenAudio:
+        return render_speech(
+            text,
+            language=language,
+            enable_orpheus=enable_orpheus,
+            orpheus_fn=_orpheus_seam(api_key, enable_orpheus),
+        )
+
+    return _speech
 
 
 @dataclass
