@@ -40,6 +40,16 @@ def test_entity_precision_and_recall_differ_when_prediction_over_generates():
     assert m.entity_recall == 1.0
 
 
+def test_total_entity_disagreement_scores_f1_zero_not_unavailable():
+    """Precision 0 and recall 0 are measured results. Reporting the worst F1
+    as "unavailable" would hide the one number a reader most needs."""
+    m = agreement_metrics([_result("ai", ["Wrong"], "positive")],
+                          [_label("ai", ["Right"], "positive")])
+    assert m.entity_precision == 0.0
+    assert m.entity_recall == 0.0
+    assert m.entity_f1 == 0.0
+
+
 def test_entity_matching_is_case_insensitive():
     m = agreement_metrics([_result("ai", ["openai"], "positive")],
                           [_label("ai", ["OpenAI"], "positive")])

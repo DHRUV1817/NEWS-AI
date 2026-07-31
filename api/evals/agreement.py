@@ -99,10 +99,16 @@ def agreement_metrics(
 
     precision = true_positives / predicted_total if predicted_total else None
     recall = true_positives / actual_total if actual_total else None
-    if precision and recall and (precision + recall) > 0:
-        f1 = 2 * precision * recall / (precision + recall)
-    else:
+    # `is None`, not truthiness: a precision or recall of exactly 0.0 is a
+    # measured result, and the worst F1 is the one number a report about
+    # honesty must not hide behind "unavailable".
+    f1: float | None
+    if precision is None or recall is None:
         f1 = None
+    elif precision + recall == 0:
+        f1 = 0.0
+    else:
+        f1 = 2 * precision * recall / (precision + recall)
 
     accuracy = sum(
         1 for p, a in zip(predicted_stances, actual_stances, strict=True) if p == a
