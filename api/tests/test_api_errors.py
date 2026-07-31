@@ -157,3 +157,84 @@ def test_an_unlisted_origin_is_not_granted_access():
     with TestClient(cors) as test_client:
         response = test_client.get("/health", headers={"Origin": "https://evil.test"})
     assert "access-control-allow-origin" not in response.headers
+
+
+# --- trust_proxy_headers: which key the window buckets on ---
+#
+# An empty body is used throughout: it is refused at validation, so the handler
+# never runs and no source is ever fetched. A 422 means "the window let this
+# through"; a 429 means it did not.
+
+
+def _window_of_one(*, trust_proxy: bool):
+    return create_app(
+        Settings(rate_limit_per_minute=1, trust_proxy_headers=trust_proxy)
+    )
+
+
+def test_the_window_buckets_on_the_forwarded_address_when_trusted():
+    """Behind a proxy, request.client.host is the proxy and every visitor shares
+    one bucket. With the header trusted, each forwarded address gets its own."""
+    with TestClient(_window_of_one(trust_proxy=True)) as test_client:
+        first = test_client.post(
+            "/analyze", json={}, headers={"X-Forwarded-For": "9.9.9.9"}
+        )
+        other = test_client.post(
+            "/analyze", json={}, headers={"X-Forwarded-For": "8.8.8.8"}
+        )
+        again = test_client.post(
+            "/analyze", json={}, headers={"X-Forwarded-For": "9.9.9.9"}
+        )
+
+    assert first.status_code == 422
+    assert other.status_code == 422, "a different forwarded address is its own bucket"
+    assert again.status_code == 429, "the same forwarded address shares one bucket"
+
+
+def test_the_window_ignores_the_forwarded_address_when_untrusted():
+    """Off by default, and the default has to mean something.
+
+    The header is spoofable unless the platform overwrites it, so an untrusting
+    service must key on the socket address — otherwise one client rotating the
+    header buys itself an unlimited allowance.
+    """
+    with TestClient(_window_of_one(trust_proxy=False)) as test_client:
+        first = test_client.post(
+            "/analyze", json={}, headers={"X-Forwarded-For": "9.9.9.9"}
+        )
+        spoofed = test_client.post(
+            "/analyze", json={}, headers={"X-Forwarded-For": "8.8.8.8"}
+        )
+
+    assert first.status_code == 422
+    assert spoofed.status_code == 429, "a rewritten header must not buy an allowance"
+
+
+def test_the_leftmost_forwarded_entry_is_the_one_the_window_uses():
+    """`split(",")[0]`, stripped: the entry the client itself controls.
+
+    Keying on the rightmost entry instead would bucket every visitor arriving
+    through one proxy hop together, which is the failure the setting exists to
+    fix. The two headers here differ only in their later hops, so a window that
+    read anything but the first entry would treat them as separate clients.
+    """
+    with TestClient(_window_of_one(trust_proxy=True)) as test_client:
+        first = test_client.post(
+            "/analyze", json={}, headers={"X-Forwarded-For": "9.9.9.9, 10.0.0.1"}
+        )
+        same_client = test_client.post(
+            "/analyze", json={}, headers={"X-Forwarded-For": " 9.9.9.9 , 10.0.0.9"}
+        )
+
+    assert first.status_code == 422
+    assert same_client.status_code == 429
+
+
+def test_a_trusting_window_falls_back_to_the_socket_address():
+    """The header is optional even when it is trusted."""
+    with TestClient(_window_of_one(trust_proxy=True)) as test_client:
+        first = test_client.post("/analyze", json={})
+        second = test_client.post("/analyze", json={})
+
+    assert first.status_code == 422
+    assert second.status_code == 429
