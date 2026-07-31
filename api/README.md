@@ -162,10 +162,17 @@ A client makes N `/analyze` calls, then one `/brief`, then one `/audio`.
 | a source failed | 502 |
 | the model would not produce valid output | 502 |
 
-Every failure uses one envelope:
+Every failure uses one envelope, including an invalid request body:
 
 ```json
 { "error": { "type": "rate_limit", "message": "…", "retry_after": 48.0 } }
+```
+
+An invalid request body carries the same envelope, with pydantic's per-field errors
+under `detail` instead of `retry_after`:
+
+```json
+{ "error": { "type": "invalid_request", "message": "…", "detail": [ ... ] } }
 ```
 
 ### What this does not do

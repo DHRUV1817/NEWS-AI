@@ -127,6 +127,30 @@ def test_retry_after_is_readable_by_a_browser():
     assert "Retry-After" in response.headers["access-control-expose-headers"]
 
 
+def test_a_missing_required_field_becomes_the_shared_envelope(client):
+    """FastAPI pre-registers its own handler for RequestValidationError, which
+    answers `{"detail": [...]}` rather than this service's one envelope. A
+    status-only assertion would pass against that shape too, so this checks
+    the body."""
+    response = client.post("/analyze", json={})
+    assert response.status_code == 422
+    body = response.json()["error"]
+    assert body["type"] == "invalid_request"
+    assert isinstance(body["detail"], list) and body["detail"]
+
+
+def test_a_blank_topic_becomes_the_shared_envelope(client):
+    """The field validator raises ValueError, but pydantic re-wraps it as a
+    RequestValidationError before FastAPI ever calls this service's handlers
+    — so this exercises the same override as the missing-field case above,
+    not the plain ValueError handler."""
+    response = client.post("/analyze", json={"topic": "   "})
+    assert response.status_code == 422
+    body = response.json()["error"]
+    assert body["type"] == "invalid_request"
+    assert isinstance(body["detail"], list) and body["detail"]
+
+
 def test_an_unlisted_origin_is_not_granted_access():
     """An empty allowlist must mean no origin, not any origin."""
     cors = create_app(Settings(allowed_origins=["https://example.vercel.app"]))

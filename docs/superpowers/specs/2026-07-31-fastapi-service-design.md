@@ -272,13 +272,20 @@ against an 8,000 TPM budget is a health check that causes outages.
 | Raised | Status | Extra |
 | --- | --- | --- |
 | `ValueError` | 422 | — |
-| request schema invalid | 422 | FastAPI's own handler |
+| request schema invalid (`RequestValidationError`) | 422 | same envelope, plus `detail`: `exc.errors()` |
 | `RateLimitError` | 429 | `Retry-After` header **and** `retry_after` in body |
 | `SourceError` | 502 | names the source |
 | `ExtractionFailure` | 502 | — |
 
 `Retry-After` appears in both header and body. The header is what proxies and browsers
 honour; the body is what the frontend can render without reading headers through CORS.
+
+`RequestValidationError` does not subclass `ValueError` and FastAPI pre-registers its own
+handler for it, so it needs its own explicit registration or a bad request body answers in
+FastAPI's `{"detail": [...]}` shape instead of this service's one envelope. The validation
+detail is preserved rather than discarded, under an optional `detail` key, run through
+`jsonable_encoder` first — `exc.errors()` can carry a raised exception in a field validator's
+`ctx`, which is not JSON-serialisable on its own.
 
 ---
 

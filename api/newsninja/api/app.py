@@ -21,6 +21,8 @@ from collections.abc import Awaitable, Callable
 from importlib.metadata import version
 
 from fastapi import FastAPI, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -30,7 +32,13 @@ from newsninja.config import Settings, get_settings
 from newsninja.errors import ExtractionFailure, RateLimitError, SourceError
 
 
-def _error(status: int, kind: str, message: str, retry_after: float | None = None) -> JSONResponse:
+def _error(
+    status: int,
+    kind: str,
+    message: str,
+    retry_after: float | None = None,
+    detail: object | None = None,
+) -> JSONResponse:
     """One envelope for every failure, so a caller parses one shape."""
     body: dict[str, object] = {"type": kind, "message": message}
     # Both annotations are required: mypy --strict rejects a bare `{}`.
@@ -40,6 +48,8 @@ def _error(status: int, kind: str, message: str, retry_after: float | None = Non
         # delta-seconds is an integer, and rounding up matters: truncating 0.4
         # to "0" tells the caller to retry straight back into a full budget.
         headers["Retry-After"] = str(math.ceil(retry_after))
+    if detail is not None:
+        body["detail"] = detail
     return JSONResponse(status_code=status, content={"error": body}, headers=headers)
 
 
@@ -61,6 +71,22 @@ async def _handle_extraction_failure(request: Request, exc: Exception) -> JSONRe
 
 async def _handle_value_error(request: Request, exc: Exception) -> JSONResponse:
     return _error(422, "invalid_request", str(exc))
+
+
+async def _handle_validation_error(request: Request, exc: Exception) -> JSONResponse:
+    # Typed as Exception to match the handler style above; narrowed here.
+    # RequestValidationError does not subclass ValueError, and FastAPI
+    # pre-registers its own handler for it, so without this override a bad
+    # request body would answer in FastAPI's shape rather than this service's
+    # one envelope.
+    errors = exc.errors() if isinstance(exc, RequestValidationError) else []
+    # exc.errors() can carry non-JSON-serialisable values (a raised ValueError
+    # in `ctx`, for a field validator's error) — jsonable_encoder coerces
+    # those to something JSONResponse can render instead of the handler
+    # itself 500ing on encode.
+    return _error(
+        422, "invalid_request", "request validation failed", detail=jsonable_encoder(errors)
+    )
 
 
 def _client_key(request: Request, trust_proxy: bool) -> str:
@@ -93,6 +119,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.add_exception_handler(SourceError, _handle_source_error)
     application.add_exception_handler(ExtractionFailure, _handle_extraction_failure)
     application.add_exception_handler(ValueError, _handle_value_error)
+    # Registered explicitly to override FastAPI's own pre-registered handler
+    # for this exact exception type, so a bad request body still answers in
+    # this service's one envelope rather than FastAPI's `{"detail": [...]}`.
+    application.add_exception_handler(RequestValidationError, _handle_validation_error)
 
     # One window per application, so a test building a fresh app gets a fresh
     # window rather than inheriting counts from whatever ran before it.
