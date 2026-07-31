@@ -30,7 +30,7 @@ def test_health_never_calls_the_model(api_app, client, monkeypatch):
     """
     from newsninja.api import deps, routes
 
-    def _explode(*args, **kwargs):
+    def _explode() -> object:
         raise AssertionError("/health must not build or call the model client")
 
     api_app.dependency_overrides[get_client] = _explode
