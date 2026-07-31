@@ -18,14 +18,22 @@ def test_health_reports_ok_and_the_package_version(client):
     assert body["version"]
 
 
-def test_health_never_calls_the_model(api_app, client):
-    """A health check that spends tokens against an 8,000 TPM budget causes
-    the outages it is supposed to detect."""
+def test_health_never_calls_the_model(client, monkeypatch):
+    """/health must not construct or call the model client.
 
-    def _explode():
+    Patching the function rather than registering a FastAPI dependency
+    override is what makes this discriminate: /health declares no
+    dependencies, so an override is never consulted, and the test would pass
+    even if the handler called get_client() directly.
+    """
+    from newsninja.api import deps, routes
+
+    def _explode(*args, **kwargs):
         raise AssertionError("/health must not build or call the model client")
 
-    api_app.dependency_overrides[get_client] = _explode
+    monkeypatch.setattr(deps, "get_client", _explode)
+    monkeypatch.setattr(routes, "get_client", _explode, raising=False)
+
     assert client.get("/health").status_code == 200
 
 
