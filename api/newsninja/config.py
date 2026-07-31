@@ -30,6 +30,21 @@ class Settings(BaseSettings):
     cache_path: Path = Path(".cache/newsninja.sqlite")
     request_timeout: int = 30
 
+    #: Origins permitted to call this service from a browser. Empty by default:
+    #: no cross-origin access is a safe failure, "*" is not.
+    allowed_origins: list[str] = []
+    #: How long a request handler may sit inside the token limiter before the
+    #: service answers 429 instead. Keeps a full budget from becoming a
+    #: connection held open until the platform proxy severs it.
+    api_max_wait_seconds: float = 5.0
+    #: Per-IP request ceiling. Stops one client hammering the service; it does
+    #: not protect the shared token budget — api_max_wait_seconds does that.
+    rate_limit_per_minute: int = 10
+    #: Read the client address from X-Forwarded-For. Off by default: the header
+    #: is spoofable unless the platform overwrites it, and trusting it blindly
+    #: turns the per-IP window into decoration.
+    trust_proxy_headers: bool = False
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

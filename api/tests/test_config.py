@@ -55,3 +55,21 @@ def test_env_example_documents_exactly_the_real_settings():
     config. Keep it mechanically in step with Settings."""
     expected = {name.upper() for name in Settings.model_fields}
     assert _documented_keys() == expected
+
+
+def test_service_settings_have_safe_defaults():
+    """Defaults must be safe to deploy without reading the docs first.
+
+    No origins means no cross-origin access rather than any; not trusting proxy
+    headers means a spoofed X-Forwarded-For cannot bypass the per-IP window.
+    """
+    settings = Settings()
+    assert settings.allowed_origins == []
+    assert settings.trust_proxy_headers is False
+    assert settings.api_max_wait_seconds == 5.0
+    assert settings.rate_limit_per_minute == 10
+
+
+def test_allowed_origins_reads_a_json_list_from_the_environment(monkeypatch):
+    monkeypatch.setenv("ALLOWED_ORIGINS", '["https://example.vercel.app"]')
+    assert Settings().allowed_origins == ["https://example.vercel.app"]
