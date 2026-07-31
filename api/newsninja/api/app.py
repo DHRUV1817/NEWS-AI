@@ -104,7 +104,17 @@ def _client_key(request: Request, trust_proxy: bool) -> str:
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    """Build the service. Pass ``settings`` to override the environment."""
+    """Build the service.
+
+    ``settings`` overrides the environment for exactly what this function
+    configures: the CORS allowlist, the per-IP window's limit, and whether
+    ``X-Forwarded-For`` is trusted. Nothing else. Everything reached through a
+    dependency — the model client and its wait ceiling, the response cache, the
+    sources, the speech seam, and ``/audio``'s handler — calls the lru-cached
+    ``get_settings()`` itself and so follows the environment regardless of what
+    is passed here. A test that needs one of those changed overrides the
+    dependency or clears that cache; passing it here would do nothing.
+    """
     resolved = settings if settings is not None else get_settings()
 
     application = FastAPI(
@@ -112,7 +122,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         description="Source-grounded news briefings with structured extraction.",
         version=version("newsninja"),
     )
-    application.state.settings = resolved
     application.include_router(router)
 
     application.add_exception_handler(RateLimitError, _handle_rate_limit)
