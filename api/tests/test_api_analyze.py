@@ -94,3 +94,46 @@ def test_skipped_and_failed_sources_stay_in_separate_fields(api_app, client):
 )
 def test_invalid_requests_are_refused(client, payload):
     assert client.post("/analyze", json=payload).status_code == 422
+
+
+class RecordingSource:
+    """Captures what the route forwarded. The forwarding is the thing tested."""
+
+    name = "google_news"
+
+    def __init__(self):
+        self.calls = []
+
+    def available(self):
+        return True
+
+    def fetch(self, topic, limit=8):
+        self.calls.append((topic, limit))
+        return [_article()]
+
+
+def test_the_requested_topic_and_limit_reach_the_sources(api_app, client):
+    """Verified: hardcoding the topic, and forcing limit=99, both left the suite
+    green.
+
+    `body["analysis"]["topic"] == "ai"` looks like a forwarding assertion and is
+    not: that value comes from the model's output, which the fake hardcodes. And
+    both fake sources discarded `limit` entirely, so nothing observed it. Only a
+    source that records what it was asked for can tell.
+    """
+    recorder = RecordingSource()
+    api_app.dependency_overrides[get_sources] = lambda: [recorder]
+
+    response = client.post("/analyze", json={"topic": "climate policy", "limit": 3})
+
+    assert response.status_code == 200
+    assert recorder.calls == [("climate policy", 3)]
+
+
+def test_the_default_limit_is_the_one_the_schema_declares(api_app, client):
+    recorder = RecordingSource()
+    api_app.dependency_overrides[get_sources] = lambda: [recorder]
+
+    client.post("/analyze", json={"topic": "ai"})
+
+    assert recorder.calls == [("ai", 8)]

@@ -3,7 +3,11 @@ from fastapi.testclient import TestClient
 
 from newsninja.analysis.client import MODEL_TPM, GroqClient
 from newsninja.analysis.limiter import TokenBudgetLimiter
-from newsninja.analysis.synthesize import SYNTHESIS_MODEL, build_briefing
+from newsninja.analysis.synthesize import (
+    SYNTHESIS_MODEL,
+    TRANSLATION_MODEL,
+    build_briefing,
+)
 from newsninja.api.deps import get_client
 from newsninja.api.schemas import MAX_BRIEF_CHARS, BriefRequest
 
@@ -125,3 +129,36 @@ def test_a_maximal_brief_request_reserves_under_half_the_budget():
     assert limiter.used_tokens() < tpm // 2, (
         f"a maximal /brief request reserved {limiter.used_tokens()} of {tpm}"
     )
+
+
+class RecordingClient:
+    """Records which models were called, which is how the language shows up."""
+
+    def __init__(self):
+        self.models = []
+
+    def structured(self, *, model, system, user, schema_model, max_retries=2):
+        raise AssertionError("/brief must not run extraction")
+
+    def text(self, *, model, system, user):
+        self.models.append(model)
+        return "Here is your briefing."
+
+
+def test_the_requested_language_reaches_the_briefing(api_app, client):
+    """Verified: forcing language="en" in the handler left the suite green.
+
+    Only rejected codes were covered. A good code was never followed through to
+    build_briefing or back out in the response.
+    """
+    recorder = RecordingClient()
+    api_app.dependency_overrides[get_client] = lambda: recorder
+
+    payload = {"analyses": [_analysis()], "language": "fr"}
+    response = client.post("/brief", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["briefing"]["language"] == "fr"
+    # Synthesis, then translation. translate() is a no-op for English, so a
+    # handler that forced "en" would make one call rather than two.
+    assert recorder.models == [SYNTHESIS_MODEL, TRANSLATION_MODEL]
