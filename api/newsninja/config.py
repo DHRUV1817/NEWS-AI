@@ -3,6 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,7 +40,13 @@ class Settings(BaseSettings):
     api_max_wait_seconds: float = 5.0
     #: Per-IP request ceiling. Stops one client hammering the service; it does
     #: not protect the shared token budget — api_max_wait_seconds does that.
-    rate_limit_per_minute: int = 10
+    #:
+    #: At least 1, because 0 is the natural operator guess for "disable this"
+    #: and it does the opposite: RateLimiter refuses at `len(hits) >= 0`, then
+    #: reads hits[0] from an empty deque. That IndexError is raised inside the
+    #: middleware, where no handler catches it, so every request — including
+    #: /health — becomes a 500 with a traceback.
+    rate_limit_per_minute: int = Field(default=10, ge=1)
     #: Read the client address from X-Forwarded-For. Off by default: the header
     #: is spoofable unless the platform overwrites it, and trusting it blindly
     #: turns the per-IP window into decoration.
