@@ -8,8 +8,16 @@ prompt-only reservation under-counts by roughly 3x and sails straight through
 the cap. ``settle`` replaces that estimate with the usage the provider actually
 reported. ``observe`` feeds the provider's own ``x-ratelimit-remaining-tokens``
 back in, so usage this process never saw still slows it down.
+
+One limiter is shared by concurrent callers — ``newsninja.api.deps.get_client``
+is a process singleton and every HTTP handler is a plain ``def``, so FastAPI
+runs them in a threadpool against one instance. Every method that reads or
+writes the window therefore holds ``_lock``. ``reserve`` releases it around the
+sleep: holding it while waiting would queue every other caller behind this one
+rather than letting them see the window it is waiting on.
 """
 
+import threading
 import time
 from collections import deque
 from collections.abc import Callable
@@ -37,6 +45,7 @@ class TokenBudgetLimiter:
         self._events: deque[tuple[float, int, int]] = deque()
         self._next_reservation = 0
         self._forced_wait_until: float = 0.0
+        self._lock = threading.Lock()
 
     def _prune(self, now: float) -> None:
         while self._events and now - self._events[0][0] >= WINDOW_SECONDS:
@@ -48,7 +57,8 @@ class TokenBudgetLimiter:
 
     def used_tokens(self) -> int:
         """Tokens booked in the current window. Reporting only."""
-        return self._used(self._clock())
+        with self._lock:
+            return self._used(self._clock())
 
     def _wait_or_refuse(self, wait: float, max_wait: float | None) -> None:
         """Sleep for ``wait``, unless a ceiling says the caller cannot afford it.
@@ -81,20 +91,26 @@ class TokenBudgetLimiter:
                 f"per-minute budget of {self._tpm}; split the request"
             )
 
-        now = self._clock()
-        if now < self._forced_wait_until:
-            self._wait_or_refuse(self._forced_wait_until - now, max_wait)
-            now = self._clock()
+        while True:
+            with self._lock:
+                now = self._clock()
+                if now < self._forced_wait_until:
+                    wait = self._forced_wait_until - now
+                elif self._used(now) + estimated_tokens > self._tpm:
+                    oldest_at, _, _ = self._events[0]
+                    wait = max(0.0, oldest_at + WINDOW_SECONDS - now)
+                else:
+                    # Reading the counter, incrementing it and appending the
+                    # event are one step: split apart, two threads take the
+                    # same id and the second settle() corrects the wrong event.
+                    reservation = self._next_reservation
+                    self._next_reservation += 1
+                    self._events.append((now, estimated_tokens, reservation))
+                    return reservation
 
-        while self._used(now) + estimated_tokens > self._tpm:
-            oldest_at, _, _ = self._events[0]
-            self._wait_or_refuse(max(0.0, oldest_at + WINDOW_SECONDS - now), max_wait)
-            now = self._clock()
-
-        reservation = self._next_reservation
-        self._next_reservation += 1
-        self._events.append((now, estimated_tokens, reservation))
-        return reservation
+            # Outside the lock on purpose — see the module docstring — so the
+            # window is re-read from scratch on the next pass.
+            self._wait_or_refuse(wait, max_wait)
 
     def settle(self, reservation: int, actual_tokens: int) -> None:
         """Replace a reservation's estimate with the call's real total usage.
@@ -102,10 +118,11 @@ class TokenBudgetLimiter:
         A reservation that has already aged out of the window is left alone: it
         is more than sixty seconds old and no longer counts against the budget.
         """
-        for index, (booked_at, _estimate, identifier) in enumerate(self._events):
-            if identifier == reservation:
-                self._events[index] = (booked_at, actual_tokens, identifier)
-                return
+        with self._lock:
+            for index, (booked_at, _estimate, identifier) in enumerate(self._events):
+                if identifier == reservation:
+                    self._events[index] = (booked_at, actual_tokens, identifier)
+                    return
 
     def observe(self, remaining: int, reset_seconds: float) -> None:
         """Record the provider's own view of the budget.
@@ -113,5 +130,6 @@ class TokenBudgetLimiter:
         When the provider says very little is left, force a wait until its stated
         reset regardless of what the local window believes.
         """
-        if remaining < self._tpm * LOW_REMAINING_FRACTION:
-            self._forced_wait_until = self._clock() + reset_seconds
+        with self._lock:
+            if remaining < self._tpm * LOW_REMAINING_FRACTION:
+                self._forced_wait_until = self._clock() + reset_seconds

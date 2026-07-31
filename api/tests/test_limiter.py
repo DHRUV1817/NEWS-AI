@@ -1,3 +1,7 @@
+import sys
+import threading
+from contextlib import contextmanager
+
 import pytest
 
 from newsninja.analysis.limiter import TokenBudgetLimiter
@@ -137,3 +141,108 @@ def test_bounded_reserve_also_bounds_the_forced_wait_path():
         limiter.reserve(100, max_wait=5.0)
     assert caught.value.retry_after == pytest.approx(90.0)
     assert clock.slept == []
+
+
+# --- concurrency ---
+#
+# One limiter is shared: get_client is a process singleton and every handler is
+# a plain `def`, so FastAPI runs them in a threadpool against one instance.
+
+#: Enough trials that the race shows up on every run rather than most runs.
+#: Measured with the lock removed: over 5 runs of 40 trials each, the budget was
+#: breached or a worker crashed on every run, but never on every trial.
+TRIALS = 200
+
+
+@contextmanager
+def _a_widened_race_window():
+    """Force the interpreter to switch threads far more often than usual.
+
+    Without this a check-then-act sequence this short usually completes inside
+    one scheduling slice, so an unsynchronised limiter passes by luck rather
+    than by construction.
+    """
+    previous = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        yield
+    finally:
+        sys.setswitchinterval(previous)
+
+
+def _reserve_from_threads(
+    limiter: TokenBudgetLimiter, threads: int, tokens: int
+) -> tuple[list[int], list[RuntimeError | IndexError]]:
+    """Have ``threads`` reserve ``tokens`` each, as simultaneously as possible.
+
+    Returns the reservation ids granted and anything raised that was not the
+    expected refusal — an unsynchronised deque raises ``RuntimeError: deque
+    mutated during iteration``, which would otherwise die inside a worker and
+    leave the caller looking at a plausible-seeming total.
+    """
+    ready = threading.Barrier(threads)
+    granted: list[int] = []
+    crashes: list[RuntimeError | IndexError] = []
+    record = threading.Lock()
+
+    def _worker() -> None:
+        ready.wait()
+        try:
+            reservation = limiter.reserve(tokens, max_wait=5.0)
+        except RateLimitError:
+            return
+        except (RuntimeError, IndexError) as exc:
+            # The two shapes an unsynchronised window takes: a deque mutated
+            # mid-sum, and `self._events[0]` read after another thread emptied
+            # it. Anything else propagates and pytest fails the test on it.
+            with record:
+                crashes.append(exc)
+            return
+        with record:
+            granted.append(reservation)
+
+    workers = [threading.Thread(target=_worker) for _ in range(threads)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    return granted, crashes
+
+
+def test_concurrent_reserves_never_book_past_the_budget():
+    """Verified failure: with the lock removed, trials booked 9,600 of 8,000.
+
+    Twelve threads reserving 2,400 against an 8,000 TPM ceiling: three fit, the
+    rest must be refused. Every thread reads the window and appends to it
+    separately, so without synchronisation several pass the check before any of
+    them books, and the window ends up over the ceiling it exists to hold.
+    """
+    worst = 0
+    with _a_widened_race_window():
+        for _ in range(TRIALS):
+            limiter = TokenBudgetLimiter(tpm=8_000)
+            _, crashes = _reserve_from_threads(limiter, threads=12, tokens=2_400)
+            assert not crashes, f"a reserving thread crashed: {crashes[0]!r}"
+            worst = max(worst, limiter.used_tokens())
+
+    assert worst <= 8_000, (
+        f"the window reached {worst} tokens against an 8,000 ceiling"
+    )
+
+
+def test_concurrent_reserves_get_distinct_reservation_ids():
+    """`self._next_reservation += 1` is a read-modify-write, not an atomic step.
+
+    Two threads reading the same value hand back the same id, and settle() then
+    rewrites whichever event it finds first — correcting one call's window entry
+    with another call's usage.
+    """
+    with _a_widened_race_window():
+        for _ in range(TRIALS):
+            limiter = TokenBudgetLimiter(tpm=1_000_000)
+            granted, crashes = _reserve_from_threads(
+                limiter, threads=12, tokens=100
+            )
+            assert not crashes, f"a reserving thread crashed: {crashes[0]!r}"
+            assert len(granted) == 12, "every reservation fits this budget"
+            assert len(set(granted)) == 12, f"duplicate reservation ids: {granted}"
