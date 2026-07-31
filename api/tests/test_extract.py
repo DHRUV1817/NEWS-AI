@@ -1,4 +1,4 @@
-from newsninja.analysis.extract import extract_topic
+from newsninja.analysis.extract import DEFAULT_MODEL, _cache_key, extract_topic
 from newsninja.cache import Cache
 from newsninja.models import Article, ArticleAnalysis
 
@@ -70,3 +70,27 @@ def test_cached_value_round_trips(tmp_path):
     first = extract_topic(RecordingClient(), "ai", _articles(), cache=cache)
     second = extract_topic(RecordingClient(), "ai", _articles(), cache=cache)
     assert first == second
+
+
+def test_cache_key_covers_the_contributing_sources():
+    """Regression: the key omitted `source`, so its identity was incomplete.
+
+    The payload is held fixed here, which is the only way to see the omission:
+    a rendered prompt happens to mention source names, but the key must not
+    depend on that coincidence.
+    """
+    payload = "identical rendered prompt"
+    from_news = [Article(title="A", url="u", source="google_news", body="b")]
+    from_reddit = [Article(title="A", url="u", source="reddit", body="b")]
+
+    assert _cache_key("ai", DEFAULT_MODEL, from_news, payload) != _cache_key(
+        "ai", DEFAULT_MODEL, from_reddit, payload
+    )
+
+
+def test_cache_key_ignores_article_order_within_the_same_sources():
+    payload = "identical rendered prompt"
+    articles = _articles()
+    assert _cache_key("ai", DEFAULT_MODEL, articles, payload) == _cache_key(
+        "ai", DEFAULT_MODEL, list(reversed(articles)), payload
+    )

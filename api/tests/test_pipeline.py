@@ -276,6 +276,63 @@ def test_cli_reports_every_failure_of_a_repeatedly_failing_source(capsys, monkey
     assert "503" in err
 
 
+def test_cli_reports_a_rate_limit_readably_with_a_nonzero_exit(capsys, monkeypatch):
+    """Regression: the only shipped interface showed a traceback."""
+    from newsninja.cli import main
+    from newsninja.errors import RateLimitError
+
+    def fake_run_pipeline(**kwargs):
+        raise RateLimitError("limit exceeded for gpt-oss-20b", retry_after=42.0)
+
+    _patch_cli(monkeypatch, fake_run_pipeline)
+
+    exit_code = main(["--topic", "ai", "--no-audio", "--no-cache"])
+    err = capsys.readouterr().err
+
+    assert exit_code != 0
+    assert "rate limit" in err.lower()
+    assert "42" in err, "the user needs to know how long to wait"
+    assert "Traceback" not in err
+
+
+def test_cli_reports_an_extraction_failure_readably(capsys, monkeypatch):
+    from newsninja.cli import main
+    from newsninja.errors import ExtractionFailure
+
+    def fake_run_pipeline(**kwargs):
+        raise ExtractionFailure("ArticleAnalysis did not validate after 3 attempts")
+
+    _patch_cli(monkeypatch, fake_run_pipeline)
+
+    exit_code = main(["--topic", "ai", "--no-audio", "--no-cache"])
+    err = capsys.readouterr().err
+
+    assert exit_code != 0
+    assert "did not validate" in err
+    assert "Traceback" not in err
+
+
+def test_cli_uses_distinct_exit_codes_for_distinct_failures(monkeypatch):
+    from newsninja.cli import EXIT_EXTRACTION, EXIT_RATE_LIMIT, main
+    from newsninja.errors import ExtractionFailure, RateLimitError
+
+    def raising(exc):
+        def _run(**kwargs):
+            raise exc
+
+        return _run
+
+    _patch_cli(monkeypatch, raising(RateLimitError("limited", retry_after=1.0)))
+    rate_limited = main(["--topic", "ai", "--no-audio", "--no-cache"])
+
+    _patch_cli(monkeypatch, raising(ExtractionFailure("no")))
+    extraction = main(["--topic", "ai", "--no-audio", "--no-cache"])
+
+    assert rate_limited == EXIT_RATE_LIMIT
+    assert extraction == EXIT_EXTRACTION
+    assert rate_limited != extraction
+
+
 def test_cli_reports_missing_credentials_without_traceback(capsys, monkeypatch):
     """The CLI must fail with a readable message, not a traceback.
 

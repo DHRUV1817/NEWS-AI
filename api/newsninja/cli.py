@@ -11,6 +11,14 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from newsninja.errors import ExtractionFailure, RateLimitError
+
+# Distinct exit codes so a script can tell "you have not configured this" from
+# "the model would not comply" from "come back later".
+EXIT_CONFIG = 1
+EXIT_EXTRACTION = 2
+EXIT_RATE_LIMIT = 3
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -39,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
             "GROQ_API_KEY is not set. Add it to .env or export it, then retry.",
             file=sys.stderr,
         )
-        return 1
+        return EXIT_CONFIG
 
     from newsninja.analysis.client import GroqClient
     from newsninja.cache import Cache
@@ -70,7 +78,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.no_audio:
         pipeline_kwargs["tts"] = lambda text, lang, orpheus: b""
 
-    result = run_pipeline(**pipeline_kwargs)
+    # The two typed failures the pipeline can end on. Both are expected states
+    # on a free tier, and neither is worth a traceback.
+    try:
+        result = run_pipeline(**pipeline_kwargs)
+    except RateLimitError as exc:
+        print(
+            f"Groq's rate limit was hit: {exc}\n"
+            f"Retry in about {exc.retry_after:.0f}s, or run fewer topics.",
+            file=sys.stderr,
+        )
+        return EXIT_RATE_LIMIT
+    except ExtractionFailure as exc:
+        print(
+            f"The model did not return schema-valid output: {exc}\n"
+            "Retrying usually helps; a persistent failure means the prompt or "
+            "the schema needs work.",
+            file=sys.stderr,
+        )
+        return EXIT_EXTRACTION
 
     print(result.briefing.script)
 
