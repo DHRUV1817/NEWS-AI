@@ -11,10 +11,16 @@ loop that would stall every other request in the process.
 """
 
 from importlib.metadata import version
+from typing import Annotated
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from newsninja.api.schemas import HealthResponse
+from newsninja.analysis.client import GroqClient
+from newsninja.api.deps import get_cache, get_client, get_sources
+from newsninja.api.schemas import AnalyzeRequest, AnalyzeResponse, HealthResponse
+from newsninja.cache import Cache
+from newsninja.pipeline import analyze_topic
+from newsninja.sources.base import Source
 
 router = APIRouter()
 
@@ -27,3 +33,26 @@ def health() -> HealthResponse:
     an 8,000 TPM budget is a health check that causes outages.
     """
     return HealthResponse(status="ok", version=version("newsninja"))
+
+
+@router.post("/analyze", response_model=AnalyzeResponse)
+def analyze(
+    payload: AnalyzeRequest,
+    client: Annotated[GroqClient, Depends(get_client)],
+    cache: Annotated[Cache | None, Depends(get_cache)],
+    sources: Annotated[list[Source], Depends(get_sources)],
+) -> AnalyzeResponse:
+    """Fetch and extract a single topic.
+
+    One topic per request is what keeps this short. Five topics reserve 11,787
+    tokens against an 8,000 TPM ceiling, so the fourth would sit in the limiter
+    for 48 seconds and the connection would not survive it.
+    """
+    outcome = analyze_topic(
+        payload.topic, sources, client, cache=cache, limit=payload.limit
+    )
+    return AnalyzeResponse(
+        analysis=outcome.analysis,
+        source_errors=outcome.source_errors,
+        skipped_sources=outcome.skipped_sources,
+    )
