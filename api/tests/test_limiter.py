@@ -1,6 +1,7 @@
 import pytest
 
 from newsninja.analysis.limiter import TokenBudgetLimiter
+from newsninja.errors import RateLimitError
 
 
 class FakeClock:
@@ -92,3 +93,47 @@ def test_reservations_are_distinct_per_call():
 
     limiter.settle(second, 500)
     assert limiter.used_tokens() == 600, "settling one call must not touch the other"
+
+
+def test_bounded_reserve_refuses_when_the_wait_exceeds_the_ceiling():
+    limiter, clock = _limiter(tpm=1000)
+    limiter.reserve(800)
+    with pytest.raises(RateLimitError):
+        limiter.reserve(400, max_wait=5.0)
+    assert clock.slept == [], "a refused reservation must not sleep at all"
+
+
+def test_bounded_reserve_reports_the_declined_wait_as_retry_after():
+    """retry_after must be the wait the limiter declined, not the ceiling.
+
+    Reporting the ceiling would tell the caller to come back in 5s when the
+    budget needs 60s, producing a retry storm against a budget already full.
+    """
+    limiter, clock = _limiter(tpm=1000)
+    limiter.reserve(800)
+    clock.now += 10.0
+    with pytest.raises(RateLimitError) as caught:
+        limiter.reserve(400, max_wait=5.0)
+    assert caught.value.retry_after == pytest.approx(50.0)
+
+
+def test_bounded_reserve_sleeps_when_the_wait_fits_the_ceiling():
+    limiter, clock = _limiter(tpm=1000)
+    limiter.reserve(800)
+    clock.now += 55.0
+    limiter.reserve(400, max_wait=30.0)
+    assert clock.slept == [pytest.approx(5.0)]
+
+
+def test_bounded_reserve_also_bounds_the_forced_wait_path():
+    """observe() sets a forced wait on a different code path from the window loop.
+
+    Bounding only the window loop lets a provider-signalled backoff hold the
+    socket open anyway, which is the exact failure the ceiling exists to prevent.
+    """
+    limiter, clock = _limiter(tpm=1000)
+    limiter.observe(remaining=10, reset_seconds=90.0)
+    with pytest.raises(RateLimitError) as caught:
+        limiter.reserve(100, max_wait=5.0)
+    assert caught.value.retry_after == pytest.approx(90.0)
+    assert clock.slept == []

@@ -14,6 +14,8 @@ import time
 from collections import deque
 from collections.abc import Callable
 
+from newsninja.errors import RateLimitError
+
 WINDOW_SECONDS = 60.0
 
 # Below this fraction of the budget, trust the provider's reset over the local
@@ -48,8 +50,27 @@ class TokenBudgetLimiter:
         """Tokens booked in the current window. Reporting only."""
         return self._used(self._clock())
 
-    def reserve(self, estimated_tokens: int) -> int:
+    def _wait_or_refuse(self, wait: float, max_wait: float | None) -> None:
+        """Sleep for ``wait``, unless a ceiling says the caller cannot afford it.
+
+        ``retry_after`` carries the wait that was declined rather than the
+        ceiling: the caller needs to know when the budget actually frees, not
+        how long this particular caller was willing to hold on.
+        """
+        if max_wait is not None and wait > max_wait:
+            raise RateLimitError(
+                f"the token budget needs {wait:.1f}s to clear, which exceeds "
+                f"this caller's {max_wait:.1f}s ceiling",
+                retry_after=wait,
+            )
+        self._sleep(wait)
+
+    def reserve(self, estimated_tokens: int, max_wait: float | None = None) -> int:
         """Block until ``estimated_tokens`` fits inside the budget, then book it.
+
+        With ``max_wait`` set, a wait longer than the ceiling raises
+        ``RateLimitError`` instead of sleeping. Callers that can afford to wait
+        — the CLI, the eval harness — pass nothing and behave as before.
 
         Returns a reservation id to hand to ``settle`` once the real cost of the
         call is known.
@@ -62,12 +83,12 @@ class TokenBudgetLimiter:
 
         now = self._clock()
         if now < self._forced_wait_until:
-            self._sleep(self._forced_wait_until - now)
+            self._wait_or_refuse(self._forced_wait_until - now, max_wait)
             now = self._clock()
 
         while self._used(now) + estimated_tokens > self._tpm:
             oldest_at, _, _ = self._events[0]
-            self._sleep(max(0.0, oldest_at + WINDOW_SECONDS - now))
+            self._wait_or_refuse(max(0.0, oldest_at + WINDOW_SECONDS - now), max_wait)
             now = self._clock()
 
         reservation = self._next_reservation
