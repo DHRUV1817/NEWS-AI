@@ -282,6 +282,17 @@ datasets/
 *.xlsx
 *.parquet
 
+# ...but never ignore project config / lockfiles that *.json above would swallow.
+# A gitignored package.json makes the frontend unbuildable on clone.
+!package.json
+!package-lock.json
+!tsconfig.json
+!tsconfig.*.json
+!next.config.json
+!components.json
+!vercel.json
+!.hallmark/*.json
+
 # Models (if any local models)
 models/
 *.pkl

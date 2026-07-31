@@ -1,0 +1,18 @@
+{
+  "date": "2026-07-31",
+  "design_md": null,
+  "font_stack": null,
+  "palette": null,
+  "motion_stance": "motion-cut",
+  "spacing_scale": null,
+  "framework": null,
+  "notes": "Python-only repo at scan time. Frontend (web/, Next.js + TypeScript) not yet scaffolded. Prior UI was Streamlit with ~20 lines of injected CSS in streamlit_app.py:23, being removed. Nothing to preserve.",
+  "preserve": [],
+  "introduce": [
+    "full OKLCH token system",
+    "macrostructure",
+    "nav + footer archetypes",
+    "microinteraction discipline",
+    "slop-test gates"
+  ]
+}
