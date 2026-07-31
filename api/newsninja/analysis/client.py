@@ -5,6 +5,7 @@ budgeting, and usage accounting. Keeping the SDK behind this seam means a
 provider swap or a test stub touches exactly one file.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Any, Protocol, TypeVar
 
@@ -28,6 +29,19 @@ MODEL_TPM = {
 
 DEFAULT_RETRY_AFTER = 60.0
 
+# Measured on structured extraction against gpt-oss-20b: a batched topic call
+# returns roughly 1,200-1,800 completion tokens. Reserving the prompt alone made
+# ten extractions read as ~6,000 tokens locally while really spending ~21,000 —
+# straight through the 8,000 TPM ceiling without the limiter ever waiting.
+EXPECTED_COMPLETION_TOKENS = 1_500
+
+# Groq's rate-limit headers. Values are durations like "7.66s" or "2m59.56s".
+REMAINING_TOKENS_HEADER = "x-ratelimit-remaining-tokens"
+RESET_TOKENS_HEADER = "x-ratelimit-reset-tokens"
+
+_DURATION_PART = re.compile(r"(\d+(?:\.\d+)?)\s*(ms|s|m|h)?")
+_UNIT_SECONDS = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
+
 
 @dataclass
 class Usage:
@@ -35,12 +49,21 @@ class Usage:
     completion_tokens: int = 0
     calls: int = 0
 
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
 
 class Transport(Protocol):
-    """Minimal seam over the Groq SDK so tests need no network."""
+    """Minimal seam over the Groq SDK so tests need no network.
 
-    def complete(self, **kwargs: Any) -> tuple[str, dict[str, int]]:
-        """Return (content, usage_dict)."""
+    Response headers are part of the return value because the provider's
+    ``x-ratelimit-*`` headers are the only ground truth about the budget; a
+    transport that discarded them would leave the limiter guessing.
+    """
+
+    def complete(self, **kwargs: Any) -> tuple[str, dict[str, int], dict[str, str]]:
+        """Return (content, usage_dict, response_headers)."""
 
 
 class StructuredClient(Protocol):
@@ -73,21 +96,31 @@ class TextClient(Protocol):
     def text(self, *, model: str, system: str, user: str) -> str: ...
 
 
+def parse_duration(value: str | None, default: float = DEFAULT_RETRY_AFTER) -> float:
+    """Parse a Groq duration header into seconds.
+
+    Handles the shapes the API actually emits — ``"7.66s"``, ``"2m59.56s"``,
+    ``"500ms"`` and a bare number — and falls back to ``default`` for anything
+    it cannot read rather than pretending the wait is zero.
+    """
+    if value is None:
+        return default
+    parts = _DURATION_PART.findall(value)
+    if not parts:
+        return default
+    return sum(float(amount) * _UNIT_SECONDS[unit or "s"] for amount, unit in parts)
+
+
 def _rate_limit_retry_after(exc: Exception) -> float:
     """Extract ``retry-after`` (seconds) from a Groq SDK rate-limit exception.
 
     Falls back to ``DEFAULT_RETRY_AFTER`` when the header is absent or the
-    value cannot be parsed as a float.
+    value cannot be parsed.
     """
     response = getattr(exc, "response", None)
     headers = getattr(response, "headers", None)
     value = headers.get("retry-after") if headers is not None else None
-    if value is None:
-        return DEFAULT_RETRY_AFTER
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return DEFAULT_RETRY_AFTER
+    return parse_duration(value)
 
 
 class GroqTransport:
@@ -96,9 +129,12 @@ class GroqTransport:
 
         self._client = Groq(api_key=api_key)
 
-    def complete(self, **kwargs: Any) -> tuple[str, dict[str, int]]:
+    def complete(self, **kwargs: Any) -> tuple[str, dict[str, int], dict[str, str]]:
         try:
-            response = self._client.chat.completions.create(**kwargs)
+            # ``with_raw_response`` keeps the HTTP headers, which the parsed
+            # response object throws away. The rate-limit headers on them are
+            # what lets the limiter correct itself.
+            raw = self._client.chat.completions.with_raw_response.create(**kwargs)
         except Exception as exc:
             # The Groq SDK raises ``groq.RateLimitError`` (status_code=429,
             # a ``response`` carrying headers) on a 429. Re-raise that as our
@@ -107,6 +143,8 @@ class GroqTransport:
             if getattr(exc, "status_code", None) == 429:
                 raise RateLimitError(str(exc), _rate_limit_retry_after(exc)) from exc
             raise
+        headers = {str(name).lower(): str(value) for name, value in raw.headers.items()}
+        response = raw.parse()
         usage = response.usage
         return (
             response.choices[0].message.content or "",
@@ -114,6 +152,7 @@ class GroqTransport:
                 "prompt_tokens": usage.prompt_tokens,
                 "completion_tokens": usage.completion_tokens,
             },
+            headers,
         )
 
 
@@ -136,10 +175,51 @@ class GroqClient:
         }
         self.usage = Usage()
 
-    def _reserve(self, model: str, prompt: str) -> None:
+    def _limiter_for(self, model: str) -> TokenBudgetLimiter:
+        """Fail loudly for a model with no configured budget.
+
+        Silently skipping the limiter for an unlisted model is how a run walks
+        into a 429 with no local warning, so an unknown model is a programming
+        error rather than a free pass.
+        """
         limiter = self._limiters.get(model)
-        if limiter is not None:
-            limiter.reserve(_estimate_tokens(prompt))
+        if limiter is None:
+            raise ValueError(
+                f"no token budget configured for model {model!r}; "
+                f"add it to MODEL_TPM (configured: {sorted(self._limiters)})"
+            )
+        return limiter
+
+    def _reserve(self, model: str, prompt: str) -> int:
+        """Book the prompt *and* the completion the response will cost."""
+        estimate = _estimate_tokens(prompt) + EXPECTED_COMPLETION_TOKENS
+        return self._limiter_for(model).reserve(estimate)
+
+    def _settle(
+        self,
+        model: str,
+        reservation: int,
+        usage: dict[str, int],
+        headers: dict[str, str],
+    ) -> None:
+        """Correct the window with what the call really cost, then with what
+        the provider says is left."""
+        limiter = self._limiter_for(model)
+        limiter.settle(
+            reservation,
+            usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0),
+        )
+
+        remaining = headers.get(REMAINING_TOKENS_HEADER)
+        if remaining is None:
+            return
+        try:
+            remaining_tokens = int(float(remaining))
+        except ValueError:
+            return
+        limiter.observe(
+            remaining_tokens, parse_duration(headers.get(RESET_TOKENS_HEADER))
+        )
 
     def _record(self, usage: dict[str, int]) -> None:
         self.usage.calls += 1
@@ -181,11 +261,12 @@ class GroqClient:
 
         last_error = ""
         for attempt in range(max_retries + 1):
-            self._reserve(model, system + user)
-            content, usage = self._transport.complete(
+            reservation = self._reserve(model, system + user)
+            content, usage, headers = self._transport.complete(
                 model=model, messages=messages, response_format=response_format
             )
             self._record(usage)
+            self._settle(model, reservation, usage, headers)
 
             try:
                 return schema_model.model_validate_json(content)
@@ -212,8 +293,8 @@ class GroqClient:
 
     def text(self, *, model: str, system: str, user: str) -> str:
         """Free-form completion for prose that needs no schema."""
-        self._reserve(model, system + user)
-        content, usage = self._transport.complete(
+        reservation = self._reserve(model, system + user)
+        content, usage, headers = self._transport.complete(
             model=model,
             messages=[
                 {"role": "system", "content": system},
@@ -221,4 +302,5 @@ class GroqClient:
             ],
         )
         self._record(usage)
+        self._settle(model, reservation, usage, headers)
         return content
