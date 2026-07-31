@@ -22,6 +22,22 @@ def _render(topic: str, articles: list[Article]) -> str:
     return "\n".join(lines)
 
 
+def _cache_key(topic: str, model: str, articles: list[Article], payload: str) -> str:
+    """The full identity of an extraction call.
+
+    ``sources`` is part of it because which sources contributed is part of what
+    was asked, not an incidental detail of how the prompt happened to render.
+    """
+    return Cache.make_key(
+        kind="extract",
+        topic=topic,
+        model=model,
+        prompt_version=PROMPT_VERSION,
+        sources=",".join(sorted({article.source for article in articles})),
+        payload=payload,
+    )
+
+
 def _empty(topic: str) -> ArticleAnalysis:
     return ArticleAnalysis(
         topic=topic,
@@ -48,13 +64,7 @@ def extract_topic(
 
     key = None
     if cache is not None:
-        key = Cache.make_key(
-            kind="extract",
-            topic=topic,
-            model=model,
-            prompt_version=PROMPT_VERSION,
-            payload=user,
-        )
+        key = _cache_key(topic, model, articles, user)
         cached = cache.get(key)
         if cached is not None:
             return ArticleAnalysis.model_validate_json(cached)
