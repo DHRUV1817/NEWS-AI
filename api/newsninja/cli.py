@@ -74,8 +74,18 @@ def main(argv: list[str] | None = None) -> int:
 
     print(result.briefing.script)
 
-    for name, message in result.source_errors.items():
-        print(f"warning: source {name} failed: {message}", file=sys.stderr)
+    # Two different things, reported differently: a skipped source is a missing
+    # capability the user can fix by adding credentials, a failed source is a
+    # source that was tried and broke.
+    for name in result.skipped_sources:
+        print(
+            f"note: source {name} was skipped (unavailable — check its credentials)",
+            file=sys.stderr,
+        )
+
+    for name, messages in result.source_errors.items():
+        for message in messages:
+            print(f"warning: source {name} failed: {message}", file=sys.stderr)
 
     if not args.no_audio:
         args.out.write_bytes(result.audio)
