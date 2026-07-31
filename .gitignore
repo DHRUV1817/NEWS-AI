@@ -105,6 +105,11 @@ tts_files/
 # Keep audio directory but ignore files
 !audio/.gitkeep
 
+# ...but the rebuilt package has a real source directory named `audio/`
+# (api/newsninja/audio/) for TTS code, not generated output — don't swallow it.
+!api/newsninja/audio/
+!api/newsninja/audio/**
+
 # =============================================================================
 # CACHE & TEMPORARY FILES
 # =============================================================================
