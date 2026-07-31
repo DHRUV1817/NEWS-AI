@@ -10,7 +10,7 @@ import argparse
 import sys
 
 from evals.corpus import CorpusRecord, load_corpus
-from evals.golden import GOLDEN_PATH, GoldenLabel, save_golden
+from evals.golden import GOLDEN_PATH, GoldenLabel, load_golden, save_golden
 from newsninja.analysis.client import StructuredClient
 from newsninja.analysis.extract import extract_topic
 from newsninja.analysis.grounding import source_corpus
@@ -23,9 +23,16 @@ def bootstrap(
     records: list[CorpusRecord],
     model: str = BOOTSTRAP_MODEL,
 ) -> list[GoldenLabel]:
-    """Draft one label per corpus record using the strongest available model."""
+    """Draft one label per corpus record using the strongest available model.
+
+    A record with no articles has nothing for the model to read; asserting a
+    stance or entities from no evidence would draft a label from nothing, so
+    such records are skipped rather than labelled.
+    """
     labels: list[GoldenLabel] = []
     for record in records:
+        if not record.articles:
+            continue
         analysis = extract_topic(client, record.topic, record.articles, model=model)
         corpus = source_corpus(record.articles)
         labels.append(
@@ -45,6 +52,26 @@ def bootstrap(
     return labels
 
 
+def merge_golden(
+    existing: list[GoldenLabel], drafted: list[GoldenLabel]
+) -> list[GoldenLabel]:
+    """Merge freshly drafted labels into an existing golden set.
+
+    A human-reviewed label is never overwritten by a draft, even if one was
+    produced for the same topic — the golden set represents irreplaceable
+    manual work, and a second bootstrap run must not silently clobber it.
+    Every other topic (absent, or present but still unreviewed) takes the
+    freshly drafted label.
+    """
+    merged: dict[str, GoldenLabel] = {label.topic: label for label in existing}
+    for label in drafted:
+        current = merged.get(label.topic)
+        if current is not None and current.reviewed:
+            continue
+        merged[label.topic] = label
+    return list(merged.values())
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="evals.bootstrap",
@@ -57,13 +84,22 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = Settings()
     records = load_corpus()
-    labels = bootstrap(GroqClient(api_key=settings.groq_api_key), records)
-    save_golden(labels)
+    existing = load_golden()
 
-    print(f"drafted {len(labels)} labels -> {GOLDEN_PATH}")
+    # Never spend a call re-drafting a topic a human has already reviewed.
+    reviewed_topics = {label.topic for label in existing if label.reviewed}
+    to_draft = [record for record in records if record.topic not in reviewed_topics]
+
+    drafted = bootstrap(GroqClient(api_key=settings.groq_api_key), to_draft)
+    merged = merge_golden(existing, drafted)
+    save_golden(merged)
+
+    preserved = sum(1 for label in existing if label.reviewed)
+    print(f"preserved {preserved} human-reviewed labels, drafted {len(drafted)} labels")
+    print(f"-> {GOLDEN_PATH}")
     print(
-        "Every label is reviewed=false and counts toward nothing until you "
-        "correct it and set reviewed=true.",
+        "Every drafted label is reviewed=false and counts toward nothing until "
+        "you correct it and set reviewed=true.",
         file=sys.stderr,
     )
     return 0

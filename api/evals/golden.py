@@ -7,9 +7,9 @@ every agreement number circular.
 """
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 GOLDEN_PATH = Path(__file__).parent / "data" / "golden.jsonl"
 
@@ -23,6 +23,19 @@ class GoldenLabel(BaseModel):
     supported_claim_quotes: list[str]
     reviewed: bool = False
     provenance: Provenance = "model-drafted"
+
+    @model_validator(mode="after")
+    def _reviewed_cannot_be_model_drafted(self) -> Self:
+        """A reviewed label grading itself as still model-drafted would let
+        model output become its own ground truth. A human who reviews a
+        draft must set ``provenance`` to ``"human-corrected"`` (or author one
+        directly as ``"human-authored"``)."""
+        if self.reviewed and self.provenance == "model-drafted":
+            raise ValueError(
+                "reviewed=True is incompatible with provenance='model-drafted'; "
+                "set provenance='human-corrected' once a human has checked it"
+            )
+        return self
 
 
 def save_golden(labels: list[GoldenLabel], path: Path = GOLDEN_PATH) -> None:
