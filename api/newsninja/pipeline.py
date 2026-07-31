@@ -19,7 +19,7 @@ from newsninja.analysis.synthesize import build_briefing
 from newsninja.audio.tts import make_orpheus_fn, synthesize_speech
 from newsninja.cache import Cache
 from newsninja.errors import SourceError
-from newsninja.models import Article, Briefing
+from newsninja.models import Article, ArticleAnalysis, Briefing
 
 if TYPE_CHECKING:
     from newsninja.sources.base import Source
@@ -72,6 +72,54 @@ def default_tts(api_key: str | None = None) -> Callable[[str, str, bool], bytes]
     return _tts
 
 
+@dataclass
+class TopicResult:
+    """One topic's analysis plus what went wrong gathering it.
+
+    Separate from ``PipelineResult`` because a single topic has no briefing and
+    no audio — folding it in would mean a type whose fields are meaningless
+    half the time.
+    """
+
+    analysis: ArticleAnalysis
+    source_errors: dict[str, list[str]] = field(default_factory=dict)
+    skipped_sources: list[str] = field(default_factory=list)
+
+
+def analyze_topic(
+    topic: str,
+    sources: list[Source],
+    client: StructuredClient,
+    cache: Cache | None = None,
+    limit: int = 8,
+) -> TopicResult:
+    """Fetch ``topic`` from every available source and extract one analysis.
+
+    Split out of ``run_pipeline`` so the HTTP layer can serve a single topic per
+    request without restating the rule that separates a skipped source from a
+    failed one.
+    """
+    articles: list[Article] = []
+    source_errors: dict[str, list[str]] = {}
+    skipped_sources: list[str] = []
+
+    for source in sources:
+        if not source.available():
+            if source.name not in skipped_sources:
+                skipped_sources.append(source.name)
+            continue
+        try:
+            articles.extend(source.fetch(topic, limit=limit))
+        except SourceError as exc:
+            source_errors.setdefault(source.name, []).append(str(exc))
+
+    return TopicResult(
+        analysis=extract_topic(client, topic, articles, cache=cache),
+        source_errors=source_errors,
+        skipped_sources=skipped_sources,
+    )
+
+
 def run_pipeline(
     topics: list[str],
     sources: list[Source],
@@ -94,17 +142,13 @@ def run_pipeline(
     analyses = []
 
     for topic in topics:
-        articles: list[Article] = []
-        for source in sources:
-            if not source.available():
-                if source.name not in skipped_sources:
-                    skipped_sources.append(source.name)
-                continue
-            try:
-                articles.extend(source.fetch(topic, limit=limit))
-            except SourceError as exc:
-                source_errors.setdefault(source.name, []).append(str(exc))
-        analyses.append(extract_topic(client, topic, articles, cache=cache))
+        outcome = analyze_topic(topic, sources, client, cache=cache, limit=limit)
+        analyses.append(outcome.analysis)
+        for name, messages in outcome.source_errors.items():
+            source_errors.setdefault(name, []).extend(messages)
+        for name in outcome.skipped_sources:
+            if name not in skipped_sources:
+                skipped_sources.append(name)
 
     briefing = build_briefing(client, analyses, language=language)
     render = tts if tts is not None else default_tts(api_key)
