@@ -37,7 +37,13 @@ class PipelineClient(StructuredClient, TextClient, Protocol):
 class PipelineResult:
     briefing: Briefing
     audio: bytes
-    source_errors: dict[str, str] = field(default_factory=dict)
+    #: Sources that raised, by name. One entry per failure, so a source failing
+    #: on several topics keeps every message rather than only the last.
+    source_errors: dict[str, list[str]] = field(default_factory=dict)
+    #: Sources skipped because they reported themselves unavailable — missing
+    #: Reddit credentials, typically. Not an error, but the user is entitled to
+    #: know the briefing was built from fewer sources than they expected.
+    skipped_sources: list[str] = field(default_factory=list)
 
 
 def default_tts(api_key: str | None = None) -> Callable[[str, str, bool], bytes]:
@@ -80,22 +86,30 @@ def run_pipeline(
     if len(topics) > MAX_TOPICS:
         raise ValueError(f"at most {MAX_TOPICS} topics per run, got {len(topics)}")
 
-    source_errors: dict[str, str] = {}
+    source_errors: dict[str, list[str]] = {}
+    skipped_sources: list[str] = []
     analyses = []
 
     for topic in topics:
         articles: list[Article] = []
         for source in sources:
             if not source.available():
+                if source.name not in skipped_sources:
+                    skipped_sources.append(source.name)
                 continue
             try:
                 articles.extend(source.fetch(topic, limit=limit))
             except SourceError as exc:
-                source_errors[source.name] = str(exc)
+                source_errors.setdefault(source.name, []).append(str(exc))
         analyses.append(extract_topic(client, topic, articles, cache=cache))
 
     briefing = build_briefing(client, analyses, language=language)
     render = tts if tts is not None else default_tts(api_key)
     audio = render(briefing.script, language, enable_orpheus)
 
-    return PipelineResult(briefing=briefing, audio=audio, source_errors=source_errors)
+    return PipelineResult(
+        briefing=briefing,
+        audio=audio,
+        source_errors=source_errors,
+        skipped_sources=skipped_sources,
+    )
