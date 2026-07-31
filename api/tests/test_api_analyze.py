@@ -137,3 +137,32 @@ def test_the_default_limit_is_the_one_the_schema_declares(api_app, client):
     client.post("/analyze", json={"topic": "ai"})
 
     assert recorder.calls == [("ai", 8)]
+
+
+def test_every_source_failing_is_still_a_200_with_an_empty_analysis(api_app, client):
+    """Finding nothing is a result, not an error.
+
+    extract_topic short-circuits to _empty() without calling the model, so this
+    pins the public shape a frontend has to render for a topic that turned up
+    no articles at all — down to the summary text, which is the only thing
+    distinguishing it from a real analysis.
+    """
+    api_app.dependency_overrides[get_sources] = lambda: [
+        FakeSource("google_news", error=SourceError("google_news", "503")),
+        FakeSource("reddit", error=SourceError("reddit", "401")),
+    ]
+
+    response = client.post("/analyze", json={"topic": "ai"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["analysis"] == {
+        "topic": "ai",
+        "summary": "No articles were found for ai.",
+        "entities": [],
+        "stance": "neutral",
+        "confidence": 0.0,
+        "key_claims": [],
+    }
+    assert set(body["source_errors"]) == {"google_news", "reddit"}
+    assert body["skipped_sources"] == []

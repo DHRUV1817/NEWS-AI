@@ -1,3 +1,5 @@
+from importlib.metadata import version
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -15,7 +17,10 @@ def test_health_reports_ok_and_the_package_version(client):
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["version"]
+    # Equality, not truthiness: `assert body["version"]` is satisfied by a
+    # hardcoded "3.0.0", which would go stale the moment the package moved and
+    # would still pass. The version has to be the package's own.
+    assert body["version"] == version("newsninja")
 
 
 def test_health_never_calls_the_model(api_app, client, monkeypatch):

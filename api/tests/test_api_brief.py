@@ -10,6 +10,7 @@ from newsninja.analysis.synthesize import (
 )
 from newsninja.api.deps import get_client
 from newsninja.api.schemas import MAX_BRIEF_CHARS, BriefRequest
+from newsninja.pipeline import MAX_TOPICS
 
 
 class FakeClient:
@@ -162,3 +163,20 @@ def test_the_requested_language_reaches_the_briefing(api_app, client):
     # Synthesis, then translation. translate() is a no-op for English, so a
     # handler that forced "en" would make one call rather than two.
     assert recorder.models == [SYNTHESIS_MODEL, TRANSLATION_MODEL]
+
+
+def test_exactly_five_analyses_are_accepted(client):
+    """The boundary itself, not just the two sides of it.
+
+    Zero and six are covered. If max_length were MAX_TOPICS - 1 both of those
+    tests would still pass while every legitimate five-topic briefing — the
+    thing the endpoint exists for — came back 422.
+    """
+    payload = {"analyses": [_analysis(f"t{n}") for n in range(MAX_TOPICS)]}
+
+    response = client.post("/brief", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["briefing"]["topics"] == [
+        f"t{n}" for n in range(MAX_TOPICS)
+    ]
