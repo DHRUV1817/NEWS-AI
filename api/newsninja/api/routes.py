@@ -16,8 +16,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from newsninja.analysis.client import GroqClient
+from newsninja.analysis.synthesize import build_briefing
 from newsninja.api.deps import get_cache, get_client, get_sources
-from newsninja.api.schemas import AnalyzeRequest, AnalyzeResponse, HealthResponse
+from newsninja.api.schemas import (
+    AnalyzeRequest,
+    AnalyzeResponse,
+    BriefRequest,
+    BriefResponse,
+    HealthResponse,
+)
 from newsninja.cache import Cache
 from newsninja.pipeline import analyze_topic
 from newsninja.sources.base import Source
@@ -56,3 +63,18 @@ def analyze(
         source_errors=outcome.source_errors,
         skipped_sources=outcome.skipped_sources,
     )
+
+
+@router.post("/brief", response_model=BriefResponse)
+def brief(
+    payload: BriefRequest,
+    client: Annotated[GroqClient, Depends(get_client)],
+) -> BriefResponse:
+    """Synthesise one script across every supplied analysis.
+
+    This renders whatever it is handed. The server holds no articles at this
+    point and cannot re-check that quotes are verbatim, so the grounding
+    guarantee belongs to /analyze, which produced them.
+    """
+    briefing = build_briefing(client, payload.analyses, language=payload.language)
+    return BriefResponse(briefing=briefing)
