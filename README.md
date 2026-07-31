@@ -120,9 +120,9 @@ docs/
   superpowers/plans/          # implementation plans
 ```
 
-`api/evals/` (evaluation harness), `api/newsninja/api.py` (FastAPI service),
-and `web/` (Next.js frontend) are referenced in the design docs under
-`docs/superpowers/specs/` but do not exist in the repository yet.
+`api/evals/` (evaluation harness) exists and is covered below. `api/newsninja/api.py`
+(FastAPI service) and `web/` (Next.js frontend) are referenced in the design docs
+under `docs/superpowers/specs/` but do not exist in the repository yet.
 
 ## Design notes
 
@@ -137,8 +137,8 @@ A few decisions worth reading the code for:
   character-for-character from the source article. `analysis/grounding.py`
   checks that by exact substring containment — no normalisation, no fuzzy
   matching, no model in the loop. Nothing currently rejects an ungrounded
-  claim at runtime; the check is a measurement utility that the (not yet
-  built) evaluation harness will read.
+  claim at runtime; the check is a measurement utility that the evaluation
+  harness (`api/evals/`) reads.
 - **Tiered model routing under a shared rate limit.** Groq's free tier caps
   tokens per minute per model. Work is spread across three models —
   extraction on `gpt-oss-20b`, synthesis on `gpt-oss-120b`, translation on
@@ -164,8 +164,9 @@ A few decisions worth reading the code for:
   Google News alone.
 - **Stance is a model judgement, not ground truth.** The `stance` field on
   each `ArticleAnalysis` is Groq's classification of an article's tone, with
-  a confidence score attached by the same model. It is not validated against
-  labelled data — see the evaluation harness note below.
+  a confidence score attached by the same model. The evaluation harness can
+  score it against human-reviewed labels (see **Project status** below), but
+  no such run has happened yet.
 - **Maximum 5 topics per run**, enforced by the pipeline.
 
 ## Project status
@@ -173,12 +174,20 @@ A few decisions worth reading the code for:
 Built and tested: the `newsninja` core package — sources, structured
 extraction, synthesis, translation, TTS, caching, rate limiting, and the CLI.
 
-Not yet built: the evaluation harness (`api/evals/`) that would produce
-schema-validity, entity precision/recall, quote-grounding rate, and stance
-agreement numbers; the FastAPI service; and the Next.js frontend. These are
-designed in `docs/superpowers/specs/2026-07-31-newsninja-portfolio-design.md`
-but not implemented, so this README makes no claims about accuracy,
-performance, or scale — there is nothing measured yet to cite.
+Also built and tested: the evaluation harness (`api/evals/`), covered in
+`api/README.md`. It computes three families of metrics — deterministic
+(schema validity, quote-grounding, ungrounded-claim rate), agreement against a
+human-reviewed golden set (entity precision/recall/F1, stance accuracy and
+Cohen's kappa), and LLM-judged rubric scores — and `python -m evals.run
+--report` writes them to `docs/evals/latest.md`. The harness has not yet been
+run against a reviewed golden set: `evals/data/golden.jsonl` has not been
+created yet (no label anywhere has `reviewed: true`), and `docs/evals/latest.md`
+does not exist. So this README makes no claims about accuracy, performance, or
+scale — there is nothing measured yet to cite.
+
+Not yet built: the FastAPI service and the Next.js frontend, designed in
+`docs/superpowers/specs/2026-07-31-newsninja-portfolio-design.md` but not
+implemented.
 
 ## License
 

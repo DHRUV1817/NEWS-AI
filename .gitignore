@@ -300,6 +300,13 @@ datasets/
 *.xlsx
 *.parquet
 
+# ...but the eval harness commits a captured article corpus under
+# api/evals/data/ on purpose (it is the fixed substrate eval runs measure
+# against, not a generated dataset) — the blanket `data/` rule above would
+# otherwise swallow the whole directory before any per-file negation applies.
+!api/evals/data/
+!api/evals/data/**
+
 # ...but never ignore project config / lockfiles that *.json above would swallow.
 # A gitignored package.json makes the frontend unbuildable on clone.
 !package.json
