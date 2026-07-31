@@ -102,22 +102,24 @@ ignore_missing_imports = true
 `api/tests/conftest.py`:
 
 ```python
-import os
 import pytest
 
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    """No test may read the developer's real credentials."""
+    """No test may read the developer's real credentials.
+
+    Uses monkeypatch throughout so every change is undone after each test —
+    setting os.environ directly would leak across tests.
+    """
     for key in (
-        "GROQ_API_KEY",
         "REDDIT_CLIENT_ID",
         "REDDIT_CLIENT_SECRET",
         "ENABLE_ORPHEUS",
         "CACHE_PATH",
     ):
         monkeypatch.delenv(key, raising=False)
-    os.environ["GROQ_API_KEY"] = "test-key-not-real"
+    monkeypatch.setenv("GROQ_API_KEY", "test-key-not-real")
 ```
 
 `api/tests/test_config.py`:
@@ -2527,10 +2529,24 @@ Append to `api/tests/test_pipeline.py`:
 
 ```python
 def test_cli_reports_missing_credentials_without_traceback(capsys, monkeypatch):
+    """The CLI must fail with a readable message, not a traceback.
+
+    `Settings` normally reads ../.env, which on a developer machine holds a real
+    key — so the class is swapped for one with env_file disabled. `cli.main`
+    imports Settings inside the function body, so patching the module attribute
+    takes effect at call time.
+    """
+    from pydantic_settings import SettingsConfigDict
+
+    import newsninja.config as config_module
     from newsninja.cli import main
 
+    class NoEnvFileSettings(config_module.Settings):
+        model_config = SettingsConfigDict(env_file=None, extra="ignore")
+
+    monkeypatch.setattr(config_module, "Settings", NoEnvFileSettings)
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    monkeypatch.setattr("newsninja.config.get_settings.cache_clear", lambda: None, raising=False)
+
     exit_code = main(["--topic", "ai", "--no-audio"])
     captured = capsys.readouterr()
     assert exit_code == 1
