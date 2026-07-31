@@ -88,7 +88,8 @@ are reported separately because they carry different epistemic weight:
   the least objective family and is presented as one model's opinion, not
   ground truth.
 
-The two families count entities differently, on purpose. Agreement case-folds
+Deterministic and agreement count entities differently, on purpose. Agreement
+case-folds
 each topic's entities into a set before scoring, so a topic naming "Apple"
 four times contributes one entity and repetition cannot buy precision.
 `mean_entities_per_topic` counts every emission, so the same topic contributes
@@ -96,12 +97,17 @@ four — it describes how much the model said, not how much of it was distinct.
 Expect the two numbers to disagree on identical data; neither is a typo for
 the other.
 
-The golden set (`evals/data/golden.jsonl`) is model-drafted and
+The golden set (`evals/data/golden.jsonl`) is meant to be model-drafted and
 human-corrected: `python -m evals.bootstrap` drafts candidate labels with
 `gpt-oss-120b` for a human to review and correct, but every drafted label
 starts `reviewed: false` and is invisible to the agreement metrics until a
 human sets `reviewed: true`. Presenting an unreviewed, model-drafted label as
 ground truth would make the agreement numbers circular.
+
+No golden set has been created yet and no run has happened, so this README
+cites no metric value from any of the three families — there is nothing
+measured yet to cite. Until `evals/data/golden.jsonl` exists with reviewed
+labels, the agreement section of a generated report reads `unavailable`.
 
 Commands, run from `api/`:
 
