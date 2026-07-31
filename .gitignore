@@ -110,6 +110,11 @@ tts_files/
 !api/newsninja/audio/
 !api/newsninja/audio/**
 
+# ...but the broad negation above also re-admits build artefacts inside that
+# directory, which the generic __pycache__ rule can no longer catch. Re-exclude.
+api/newsninja/audio/__pycache__/
+api/newsninja/audio/**/*.py[cod]
+
 # =============================================================================
 # CACHE & TEMPORARY FILES
 # =============================================================================
