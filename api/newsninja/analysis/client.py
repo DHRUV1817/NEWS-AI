@@ -43,6 +43,25 @@ class Transport(Protocol):
         """Return (content, usage_dict)."""
 
 
+class StructuredClient(Protocol):
+    """Structural seam for callers that only need ``structured()``.
+
+    Satisfied by ``GroqClient`` and by test stubs (e.g. ``RecordingClient``)
+    without either needing to subclass this — it's a ``Protocol``, matched
+    structurally, not a nominal base class.
+    """
+
+    def structured(
+        self,
+        *,
+        model: str,
+        system: str,
+        user: str,
+        schema_model: type[T],
+        max_retries: int = 2,
+    ) -> T: ...
+
+
 def _rate_limit_retry_after(exc: Exception) -> float:
     """Extract ``retry-after`` (seconds) from a Groq SDK rate-limit exception.
 

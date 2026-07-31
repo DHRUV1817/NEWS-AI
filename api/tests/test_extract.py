@@ -1,5 +1,3 @@
-import json
-
 from newsninja.analysis.extract import extract_topic
 from newsninja.cache import Cache
 from newsninja.models import Article, ArticleAnalysis
