@@ -1,6 +1,0 @@
-streamlit
-groq
-gtts
-feedparser
-requests
-python-dotenv

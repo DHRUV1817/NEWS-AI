@@ -17,6 +17,14 @@ config/secrets/
 *token*
 *secret*
 
+# ...but *token* above is broad enough to swallow legitimate source files.
+# tokens.css is the design-system token file Hallmark emits; without these
+# negations the frontend would ship without its stylesheet.
+!*tokens.css
+!*tokens.ts
+!*tokens.json
+!tokens/
+
 # =============================================================================
 # PYTHON
 # =============================================================================
@@ -96,6 +104,16 @@ tts_files/
 
 # Keep audio directory but ignore files
 !audio/.gitkeep
+
+# ...but the rebuilt package has a real source directory named `audio/`
+# (api/newsninja/audio/) for TTS code, not generated output — don't swallow it.
+!api/newsninja/audio/
+!api/newsninja/audio/**
+
+# ...but the broad negation above also re-admits build artefacts inside that
+# directory, which the generic __pycache__ rule can no longer catch. Re-exclude.
+api/newsninja/audio/__pycache__/
+api/newsninja/audio/**/*.py[cod]
 
 # =============================================================================
 # CACHE & TEMPORARY FILES
@@ -282,6 +300,17 @@ datasets/
 *.xlsx
 *.parquet
 
+# ...but never ignore project config / lockfiles that *.json above would swallow.
+# A gitignored package.json makes the frontend unbuildable on clone.
+!package.json
+!package-lock.json
+!tsconfig.json
+!tsconfig.*.json
+!next.config.json
+!components.json
+!vercel.json
+!.hallmark/*.json
+
 # Models (if any local models)
 models/
 *.pkl
@@ -336,4 +365,12 @@ local_config.py
 !.env.example
 !Pipfile
 !pyproject.toml
-!setup.pystreamlit/secrets.toml
+!setup.py
+streamlit/secrets.toml
+
+# Agent skills (installed via npx skills)
+.agents/
+.claude/skills/
+
+# Subagent-driven-development scratch workspace
+.superpowers/
