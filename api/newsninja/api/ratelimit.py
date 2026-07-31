@@ -19,6 +19,7 @@ class RateLimiter:
         self._limit = limit
         self._clock = clock
         self._hits: dict[str, deque[float]] = {}
+        self._last_eviction_time = -WINDOW_SECONDS  # Allow eviction on first call
 
     def tracked_clients(self) -> int:
         """How many addresses currently hold state. Reporting and tests only."""
@@ -30,7 +31,13 @@ class RateLimiter:
         Without this the key map grows once per distinct address seen and never
         shrinks, so a caller cycling source addresses could exhaust memory
         through the very component meant to bound abuse.
+
+        This runs at most once per WINDOW_SECONDS to keep the operation O(1)
+        amortised per request rather than O(n) in the number of clients.
         """
+        if now - self._last_eviction_time < WINDOW_SECONDS:
+            return
+        self._last_eviction_time = now
         for key in list(self._hits.keys()):
             hits = self._hits[key]
             while hits and now - hits[0] >= WINDOW_SECONDS:

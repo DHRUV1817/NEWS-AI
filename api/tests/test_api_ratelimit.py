@@ -52,3 +52,29 @@ def test_idle_clients_are_evicted_rather_than_accumulating():
     clock.now += 61.0
     limiter.check("10.0.1.1")
     assert limiter.tracked_clients() == 1
+
+
+def test_eviction_is_throttled():
+    """Eviction sweep only runs once per window, not on every request.
+
+    This keeps the operation O(1) amortised per request rather than O(n) in
+    the number of tracked clients. Many distinct clients seen within one window
+    remain tracked until after the window elapses and a new request triggers
+    the sweep.
+    """
+    clock = FakeClock()
+    limiter = RateLimiter(limit=1, clock=clock.time)
+    # See many distinct clients at time 0
+    for octet in range(20):
+        limiter.check(f"10.0.0.{octet}")
+    assert limiter.tracked_clients() == 20
+    # At time 30, they're still tracked (sweep hasn't run; < 60 seconds since last sweep at time 0)
+    clock.now += 30.0
+    limiter.check("10.0.1.0")
+    assert limiter.tracked_clients() == 21
+    # At time 90, sweep finally runs and clears the old clients
+    # (60+ seconds since the first sweep at time 0)
+    clock.now += 60.0
+    limiter.check("10.0.2.0")
+    # Old clients from times 0 and 30 are now gone; only the latest remains
+    assert limiter.tracked_clients() == 1
