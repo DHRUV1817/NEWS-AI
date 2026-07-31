@@ -370,7 +370,14 @@ backups are written to `/tmp`, never into the repository.
 
 **Actual deployment.** It needs an account, a rotated Groq key (handoff §9.1), and choices
 only the owner can make. This plan produces a service that runs locally under
-`uvicorn newsninja.api:app` and is *ready* to deploy. It does not deploy it.
+`uvicorn newsninja.api:create_app --factory` and is *ready* to deploy. It does not
+deploy it.
+
+The entrypoint is the factory rather than a module-level `app` deliberately. Building
+the application at import time constructs `Settings`, which reads the credentials file
+on *any* import of the package — so a machine without a configured key cannot even
+import the module to run an unrelated test. Deferring construction to the server means
+credentials are read when a server starts and at no other time.
 
 **Authentication.** The service is public and unauthenticated by design; the bounded
 reserve and per-IP window are what stand between it and a drained key.

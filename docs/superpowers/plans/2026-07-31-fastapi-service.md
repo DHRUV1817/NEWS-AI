@@ -1894,7 +1894,7 @@ Add a section to `api/README.md`. Every claim below must be true of the code as 
 ## HTTP service
 
 ```bash
-uv run --python 3.12 uvicorn newsninja.api:app --reload
+uv run --python 3.12 uvicorn newsninja.api:create_app --factory --reload
 ```
 
 Interactive docs at `http://127.0.0.1:8000/docs`.
@@ -1972,7 +1972,7 @@ Expected: all tests pass, mypy `Success`, ruff clean, exactly one `# noqa`, no `
 A passing test suite does not prove the app boots under a real server — `TestClient` and `uvicorn` load it differently.
 
 ```bash
-uv run --python 3.12 uvicorn newsninja.api:app --port 8123 &
+uv run --python 3.12 uvicorn newsninja.api:create_app --factory --port 8123 &
 sleep 3
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8123/health   # expect 200
 curl -s http://127.0.0.1:8123/openapi.json | head -c 200                 # expect JSON
