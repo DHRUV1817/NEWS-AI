@@ -10,22 +10,25 @@ in a threadpool. The token limiter blocks with ``time.sleep``; on the event
 loop that would stall every other request in the process.
 """
 
+from collections.abc import Callable
 from importlib.metadata import version
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 
 from newsninja.analysis.client import GroqClient
 from newsninja.analysis.synthesize import build_briefing
-from newsninja.api.deps import get_cache, get_client, get_sources
+from newsninja.api.deps import get_cache, get_client, get_sources, get_tts
 from newsninja.api.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
+    AudioRequest,
     BriefRequest,
     BriefResponse,
     HealthResponse,
 )
 from newsninja.cache import Cache
+from newsninja.config import Settings, get_settings
 from newsninja.pipeline import analyze_topic
 from newsninja.sources.base import Source
 
@@ -78,3 +81,20 @@ def brief(
     """
     briefing = build_briefing(client, payload.analyses, language=payload.language)
     return BriefResponse(briefing=briefing)
+
+
+@router.post("/audio")
+def audio(
+    payload: AudioRequest,
+    tts: Annotated[Callable[[str, str, bool], bytes], Depends(get_tts)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> Response:
+    """Render a supplied script to speech.
+
+    Returns raw bytes rather than JSON. The media type follows the configured
+    engine because synthesize_speech returns mp3 from gTTS and wav from
+    Orpheus; a constant header would misdescribe one of them.
+    """
+    spoken = tts(payload.script, payload.language, settings.enable_orpheus)
+    media_type = "audio/wav" if settings.enable_orpheus else "audio/mpeg"
+    return Response(content=spoken, media_type=media_type)
