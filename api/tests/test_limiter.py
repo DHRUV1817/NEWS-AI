@@ -53,3 +53,42 @@ def test_reservation_larger_than_the_whole_budget_raises():
     limiter, _ = _limiter(tpm=1000)
     with pytest.raises(ValueError):
         limiter.reserve(1001)
+
+
+def test_settle_replaces_the_estimate_with_actual_usage():
+    """Completion tokens used to be invisible: only the estimate was ever booked."""
+    limiter, clock = _limiter(tpm=1000)
+    reservation = limiter.reserve(100)
+    limiter.settle(reservation, 900)
+
+    assert limiter.used_tokens() == 900
+    limiter.reserve(200)  # 900 + 200 > 1000
+    assert clock.slept, "the window must reflect what the call really cost"
+
+
+def test_settle_can_release_budget_when_a_call_came_in_cheap():
+    limiter, clock = _limiter(tpm=1000)
+    reservation = limiter.reserve(900)
+    limiter.settle(reservation, 100)
+
+    limiter.reserve(800)
+    assert clock.slept == [], "an over-estimate must not hold the budget hostage"
+
+
+def test_settle_ignores_a_reservation_that_aged_out_of_the_window():
+    limiter, clock = _limiter(tpm=1000)
+    reservation = limiter.reserve(100)
+    clock.now += 61
+    limiter.settle(reservation, 900)
+
+    assert limiter.used_tokens() == 0
+
+
+def test_reservations_are_distinct_per_call():
+    limiter, _ = _limiter(tpm=1000)
+    first = limiter.reserve(100)
+    second = limiter.reserve(100)
+    assert first != second
+
+    limiter.settle(second, 500)
+    assert limiter.used_tokens() == 600, "settling one call must not touch the other"
