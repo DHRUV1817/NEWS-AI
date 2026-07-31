@@ -352,3 +352,6 @@ local_config.py
 # Agent skills (installed via npx skills)
 .agents/
 .claude/skills/
+
+# Subagent-driven-development scratch workspace
+.superpowers/
