@@ -129,6 +129,69 @@ found no articles are skipped rather than extracted, and the report's header
 says how many were skipped so `Topics evaluated` can be reconciled against the
 corpus.
 
+## HTTP service
+
+```bash
+uv run --python 3.12 uvicorn newsninja.api:create_app --factory --reload
+```
+
+Interactive docs at `http://127.0.0.1:8000/docs`.
+
+The endpoints are split so no single request runs long. That is arithmetic, not
+preference: `openai/gpt-oss-20b` allows 8,000 tokens per minute, one topic
+reserves roughly 2,400, and five topics reserve 11,787 — so a five-topic request
+sits in the token limiter for 48 seconds and no free-tier proxy will hold the
+connection. Measured against `evals/data/corpus.jsonl`; see
+`docs/superpowers/specs/2026-07-31-fastapi-service-design.md`.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /health` | Liveness and package version. Never calls the model. |
+| `POST /analyze` | One topic in, one `ArticleAnalysis` out. |
+| `POST /brief` | 1–5 analyses in, one unified script out. |
+| `POST /audio` | A script in, audio bytes out. |
+
+A client makes N `/analyze` calls, then one `/brief`, then one `/audio`.
+
+### Failures
+
+| Condition | Status |
+| --- | --- |
+| invalid request body | 422 |
+| token budget exhausted | 429, with `Retry-After` |
+| a source failed | 502 |
+| the model would not produce valid output | 502 |
+
+Every failure uses one envelope:
+
+```json
+{ "error": { "type": "rate_limit", "message": "…", "retry_after": 48.0 } }
+```
+
+### What this does not do
+
+`/brief` renders whatever analyses it is given. The server holds no articles at
+that point and cannot check that quotes are verbatim, so the grounding guarantee
+belongs to `/analyze`, which produced them.
+
+The per-IP window is in-process: it resets on restart and does not hold across
+multiple instances. It bounds one client, not the shared token budget — the
+limiter's wait ceiling does that.
+
+`TRUST_PROXY_HEADERS` is off by default. Turning it on trusts the platform to
+overwrite `X-Forwarded-For`; on a platform that does not, the per-IP window
+becomes bypassable by setting the header.
+
+### Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `GROQ_API_KEY` | required | — |
+| `ALLOWED_ORIGINS` | `[]` | JSON list of browser origins |
+| `API_MAX_WAIT_SECONDS` | `5.0` | limiter wait before answering 429 |
+| `RATE_LIMIT_PER_MINUTE` | `10` | per-IP request ceiling |
+| `TRUST_PROXY_HEADERS` | `false` | read `X-Forwarded-For` |
+
 ## Not here yet
 
 No web UI. `api/evals/` (above) covers extraction quality; there is no
