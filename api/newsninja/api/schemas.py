@@ -5,15 +5,42 @@ LLM output schema, and letting HTTP concerns leak into them would couple the
 wire format to the thing being measured.
 """
 
-from typing import Self
+from typing import Annotated, Self
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 
+from newsninja.audio.tts import SUPPORTED_LANGUAGES
 from newsninja.models import ArticleAnalysis, Briefing
 from newsninja.pipeline import MAX_TOPICS
 
 #: A language code reaches a translation prompt, so it is not free text.
 LANGUAGE_PATTERN = r"^[a-z]{2}(-[A-Za-z]{2})?$"
+
+
+def _supported_language(value: str) -> str:
+    """Refuse a code the pipeline would silently rewrite.
+
+    The shape check is not enough. ``"sv"`` and ``"en-GB"`` both match the
+    pattern, and ``synthesize_speech`` rewrites anything outside
+    ``SUPPORTED_LANGUAGES`` to ``"en"`` without saying so — so a caller asking
+    for Swedish gets a Swedish script spoken in English, with nothing in the
+    response indicating that happened. Refusing is the honest answer; the set
+    lives in ``audio/tts.py`` because that is what enforces it downstream.
+    """
+    if value not in SUPPORTED_LANGUAGES:
+        raise ValueError(
+            f"language {value!r} is not supported; "
+            f"choose one of {sorted(SUPPORTED_LANGUAGES)}"
+        )
+    return value
+
+
+#: Shape first, then membership. The shape check is what keeps a rejected code
+#: out of an error message unescaped; the membership check is what keeps the
+#: caller from being told nothing about a language the pipeline cannot speak.
+Language = Annotated[
+    str, Field(pattern=LANGUAGE_PATTERN), AfterValidator(_supported_language)
+]
 
 #: chunk_text splits at 3,000 characters and gTTS makes one outbound call per
 #: chunk, so an uncapped script is an amplification vector: 1 MB of text becomes
@@ -78,7 +105,7 @@ class AnalyzeResponse(BaseModel):
 
 class BriefRequest(BaseModel):
     analyses: list[ArticleAnalysis] = Field(min_length=1, max_length=MAX_TOPICS)
-    language: str = Field(default="en", pattern=LANGUAGE_PATTERN)
+    language: Language = "en"
 
     @model_validator(mode="after")
     def _bound_the_total_text(self) -> Self:
@@ -98,7 +125,7 @@ class BriefResponse(BaseModel):
 
 class AudioRequest(BaseModel):
     script: str = Field(min_length=1, max_length=MAX_SCRIPT_CHARS)
-    language: str = Field(default="en", pattern=LANGUAGE_PATTERN)
+    language: Language = "en"
 
 
 class HealthResponse(BaseModel):

@@ -3,7 +3,12 @@ from fastapi.testclient import TestClient
 
 from newsninja.api.deps import get_tts
 from newsninja.api.schemas import MAX_SCRIPT_CHARS
-from newsninja.audio.tts import MP3_MEDIA_TYPE, WAV_MEDIA_TYPE, SpokenAudio
+from newsninja.audio.tts import (
+    MP3_MEDIA_TYPE,
+    SUPPORTED_LANGUAGES,
+    WAV_MEDIA_TYPE,
+    SpokenAudio,
+)
 from newsninja.config import get_settings
 
 
@@ -104,3 +109,20 @@ def test_the_live_seam_reports_mp3_when_orpheus_is_enabled_but_fails():
     )
     assert spoken.data.startswith(b"MP3")
     assert spoken.media_type == MP3_MEDIA_TYPE
+
+
+@pytest.mark.parametrize("language", ["sv", "nl", "en-GB"])
+def test_audio_refuses_a_language_it_would_silently_rewrite(client, language):
+    """synthesize_speech maps any unsupported code to "en" without saying so.
+
+    Accepting the request would return English audio for a Swedish script and
+    report success, which is worse than refusing.
+    """
+    payload = {"script": "hej", "language": language}
+    assert client.post("/audio", json=payload).status_code == 422
+
+
+@pytest.mark.parametrize("language", SUPPORTED_LANGUAGES)
+def test_audio_accepts_every_supported_language(client, language):
+    payload = {"script": "hello", "language": language}
+    assert client.post("/audio", json=payload).status_code == 200

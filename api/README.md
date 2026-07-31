@@ -151,7 +151,14 @@ connection. Measured against `evals/data/corpus.jsonl`; see
 | `POST /brief` | 1–5 analyses in, one unified script out. |
 | `POST /audio` | A script in, audio bytes out. |
 
-A client makes N `/analyze` calls, then one `/brief`, then one `/audio`.
+A client makes N `/analyze` calls, then one `/brief`, then one `/audio`. Feed
+`/brief` the `analysis` object out of each `/analyze` response, not the response
+itself. `/brief` answers `{"briefing": {...}}`.
+
+Two bounds a caller meets as a `422`: `/brief` accepts at most 8,000 characters
+of analysis text across the whole request, and both `/brief` and `/audio` accept
+only the twelve language codes the speech layer supports — a code outside that
+set would be silently spoken in English, so it is refused instead.
 
 ### Failures
 
@@ -189,6 +196,11 @@ limiter's wait ceiling does that.
 overwrite `X-Forwarded-For`; on a platform that does not, the per-IP window
 becomes bypassable by setting the header.
 
+The response cache is an unbounded public write surface. `/analyze` writes one
+row per distinct topic, `Cache` has no TTL and no size cap, and nothing in the
+service calls `clear()` — so the SQLite file grows with the number of distinct
+topics anyone has ever asked for, and only deleting `CACHE_PATH` shrinks it.
+
 ### Configuration
 
 | Variable | Default | Purpose |
@@ -196,8 +208,16 @@ becomes bypassable by setting the header.
 | `GROQ_API_KEY` | required | — |
 | `ALLOWED_ORIGINS` | `[]` | JSON list of browser origins |
 | `API_MAX_WAIT_SECONDS` | `5.0` | limiter wait before answering 429 |
-| `RATE_LIMIT_PER_MINUTE` | `10` | per-IP request ceiling |
+| `RATE_LIMIT_PER_MINUTE` | `10` | per-IP request ceiling; at least 1 |
 | `TRUST_PROXY_HEADERS` | `false` | read `X-Forwarded-For` |
+| `ENABLE_ORPHEUS` | `false` | ask for Orpheus speech instead of gTTS |
+
+`ENABLE_ORPHEUS` is the only variable that can change a response `Content-Type`.
+It changes what is *asked for*, not what comes back: every Orpheus failure falls
+back to gTTS, so `/audio` reports the media type of the bytes it actually
+produced — `audio/wav` only for a successful Orpheus call, `audio/mpeg`
+otherwise, including for the fallback. With the terms unaccepted that fallback
+is the live path.
 
 ## Not here yet
 

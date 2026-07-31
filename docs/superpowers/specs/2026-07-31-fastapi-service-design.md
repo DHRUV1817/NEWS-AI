@@ -215,13 +215,24 @@ it wraps.
 { "analyses": [ { "topic": "…", "summary": "…", "…": "…" } ], "language": "en" }
 ```
 
-`analyses` holds 1 to 5 `ArticleAnalysis` objects in the same shape `/analyze` returns.
+`analyses` holds 1 to 5 `ArticleAnalysis` objects — the shape of `/analyze`'s `analysis`
+field, not of its response body. A caller pipes `/analyze` output into `/brief` by
+plucking `.analysis` from each response; POSTing the response objects whole is a `422`.
 
-`language` is validated against `^[a-z]{2}(-[A-Za-z]{2})?$`. It reaches a translation
-prompt, so it is not a free-text field. The 1–5 bound imports `MAX_TOPICS` rather than
-restating the number.
+Their combined free text is capped at **8,000 characters** across the request. The count
+bound alone bounds nothing: four analyses with 6,000-character summaries reserve 7,737 of
+`gpt-oss-120b`'s 8,000 TPM, so one unauthenticated request holds 97% of the shared minute.
 
-Returns the `Briefing` unchanged: `topics`, `script`, `analyses`, `language`.
+`language` is validated against `^[a-z]{2}(-[A-Za-z]{2})?$` **and** against membership of
+`SUPPORTED_LANGUAGES`. It reaches a translation prompt, so it is not a free-text field;
+and `synthesize_speech` rewrites any code outside that set to `"en"` without saying so,
+so a shape-valid `"sv"` would return a Swedish script that `/audio` speaks in English.
+Both `/brief` and `/audio` answer `422` for such a code. The 1–5 bound imports
+`MAX_TOPICS` rather than restating the number.
+
+Returns the `Briefing` under a `briefing` key: `{ "briefing": { "topics": …, "script": …,
+"analyses": …, "language": … } }`. The envelope is deliberate — it leaves room to add
+response fields beside the briefing without changing the shape of the briefing itself.
 
 **Stated limitation.** `/brief` renders whatever analyses it receives. The server holds no
 articles at that point and cannot re-check that quotes are verbatim. The grounding
@@ -242,13 +253,16 @@ reasonably assume `/brief` validates, and this project does not let readers assu
 characters and gTTS makes one outbound call per chunk, so an uncapped script is an
 amplification vector — 1 MB of text becomes roughly 350 requests from the host.
 
-Returns raw bytes. `Content-Type` is `audio/mpeg` for gTTS or `audio/wav` when Orpheus is
-enabled, since `synthesize_speech` returns different formats. Orpheus terms are unaccepted
-(handoff §5), so in practice this is `audio/mpeg` today.
+Returns raw bytes. `Content-Type` is whatever the speech seam reports for the bytes it
+produced — `audio/mpeg` for gTTS, `audio/wav` for a successful Orpheus call. It cannot be
+read off `ENABLE_ORPHEUS`: every Orpheus failure falls back to gTTS, and Orpheus terms are
+unaccepted (handoff §5), so with Orpheus enabled the live path still produces mp3 and a
+configuration-derived header would label those bytes `audio/wav`.
 
-The speech callable comes from `default_tts(settings.groq_api_key)` — the key is required
-because Orpheus is a separate REST endpoint, not part of the chat client
-(`pipeline.py:52-72`). It is built once in `deps.py`, not per request.
+The speech callable comes from `default_speech(settings.groq_api_key)`, which returns a
+`SpokenAudio(data, media_type)` rather than bare bytes. The key is required because
+Orpheus is a separate REST endpoint, not part of the chat client. It is built once in
+`deps.py`, not per request.
 
 ### `GET /health`
 
