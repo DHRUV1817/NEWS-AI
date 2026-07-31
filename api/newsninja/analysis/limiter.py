@@ -36,10 +36,6 @@ class TokenBudgetLimiter:
         self._next_reservation = 0
         self._forced_wait_until: float = 0.0
 
-    @property
-    def tpm(self) -> int:
-        return self._tpm
-
     def _prune(self, now: float) -> None:
         while self._events and now - self._events[0][0] >= WINDOW_SECONDS:
             self._events.popleft()

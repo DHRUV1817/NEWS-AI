@@ -49,10 +49,6 @@ class Usage:
     completion_tokens: int = 0
     calls: int = 0
 
-    @property
-    def total_tokens(self) -> int:
-        return self.prompt_tokens + self.completion_tokens
-
 
 class Transport(Protocol):
     """Minimal seam over the Groq SDK so tests need no network.
