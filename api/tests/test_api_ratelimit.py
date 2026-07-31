@@ -55,26 +55,27 @@ def test_idle_clients_are_evicted_rather_than_accumulating():
 
 
 def test_eviction_is_throttled():
-    """Eviction sweep only runs once per window, not on every request.
+    """A stale entry must survive inside the throttle interval.
 
-    This keeps the operation O(1) amortised per request rather than O(n) in
-    the number of tracked clients. Many distinct clients seen within one window
-    remain tracked until after the window elapses and a new request triggers
-    the sweep.
+    This is the assertion that distinguishes a throttled sweep from an
+    unthrottled one: at t=75 client "b" has been expired for 5 seconds, and
+    only a sweep that was skipped leaves it in the map. Sweeping on every
+    request would report 2 here.
     """
     clock = FakeClock()
-    limiter = RateLimiter(limit=1, clock=clock.time)
-    # See many distinct clients at time 0
-    for octet in range(20):
-        limiter.check(f"10.0.0.{octet}")
-    assert limiter.tracked_clients() == 20
-    # At time 30, they're still tracked (sweep hasn't run; < 60 seconds since last sweep at time 0)
-    clock.now += 30.0
-    limiter.check("10.0.1.0")
-    assert limiter.tracked_clients() == 21
-    # At time 90, sweep finally runs and clears the old clients
-    # (60+ seconds since the first sweep at time 0)
-    clock.now += 60.0
-    limiter.check("10.0.2.0")
-    # Old clients from times 0 and 30 are now gone; only the latest remains
-    assert limiter.tracked_clients() == 1
+    limiter = RateLimiter(limit=10, clock=clock.time)
+
+    limiter.check("a")           # t=0 — the first sweep runs here
+    clock.now = 10.0
+    limiter.check("b")           # inside the interval, so no sweep
+    clock.now = 60.0
+    limiter.check("c")           # interval elapsed: sweep runs and drops "a"
+    clock.now = 75.0
+    limiter.check("d")           # inside the new interval: "b" is expired but must NOT be swept
+
+    assert limiter.tracked_clients() == 3   # b (stale), c, d
+
+    clock.now = 125.0
+    limiter.check("e")           # crosses the boundary: the stale entry finally goes
+
+    assert limiter.tracked_clients() == 2   # d, e
