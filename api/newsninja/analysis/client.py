@@ -164,11 +164,16 @@ class GroqClient:
         api_key: str,
         limiters: dict[str, TokenBudgetLimiter] | None = None,
         transport: Transport | None = None,
+        max_wait: float | None = None,
     ) -> None:
         self._transport = transport or GroqTransport(api_key)
         self._limiters = limiters or {
             model: TokenBudgetLimiter(tpm) for model, tpm in MODEL_TPM.items()
         }
+        # None means "wait as long as it takes", which is right for the CLI and
+        # the eval harness. The HTTP service supplies a ceiling so a full budget
+        # becomes a 429 rather than a held-open connection.
+        self._max_wait = max_wait
         self.usage = Usage()
 
     def _limiter_for(self, model: str) -> TokenBudgetLimiter:
@@ -189,7 +194,7 @@ class GroqClient:
     def _reserve(self, model: str, prompt: str) -> int:
         """Book the prompt *and* the completion the response will cost."""
         estimate = _estimate_tokens(prompt) + EXPECTED_COMPLETION_TOKENS
-        return self._limiter_for(model).reserve(estimate)
+        return self._limiter_for(model).reserve(estimate, max_wait=self._max_wait)
 
     def _settle(
         self,

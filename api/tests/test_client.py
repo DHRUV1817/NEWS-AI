@@ -317,3 +317,40 @@ def test_duration_headers_are_parsed(value, expected):
 def test_unparseable_duration_falls_back_rather_than_returning_zero():
     assert parse_duration(None) == 60.0
     assert parse_duration("soon") == 60.0
+
+
+def test_a_client_with_a_ceiling_refuses_rather_than_waiting():
+    """The ceiling has to reach the limiter, not merely be stored on the client."""
+    clock = FakeClock()
+    limiter = TokenBudgetLimiter(tpm=2000, clock=clock.time, sleeper=clock.sleep)
+    limiter.reserve(1900)
+
+    client = GroqClient(
+        api_key="test",
+        limiters={"openai/gpt-oss-20b": limiter},
+        transport=StubTransport(['{"name": "a", "score": 1.0}']),
+        max_wait=5.0,
+    )
+
+    with pytest.raises(RateLimitError):
+        client.structured(
+            model="openai/gpt-oss-20b", system="s", user="u", schema_model=Tiny
+        )
+    assert clock.slept == []
+
+
+def test_a_client_without_a_ceiling_still_waits():
+    clock = FakeClock()
+    limiter = TokenBudgetLimiter(tpm=2000, clock=clock.time, sleeper=clock.sleep)
+    limiter.reserve(1900)
+
+    client = GroqClient(
+        api_key="test",
+        limiters={"openai/gpt-oss-20b": limiter},
+        transport=StubTransport(['{"name": "a", "score": 1.0}']),
+    )
+
+    client.structured(
+        model="openai/gpt-oss-20b", system="s", user="u", schema_model=Tiny
+    )
+    assert clock.slept, "with no ceiling the client must wait, as the CLI relies on"
