@@ -66,6 +66,28 @@ def test_judged_section_is_separated_from_deterministic():
     assert "4.2" in out
 
 
+def test_skipped_corpus_records_are_stated_in_the_header():
+    """`topics evaluated: 4` from a five-record corpus is not something a
+    reader should have to reconstruct from the stderr of a run they missed."""
+    meta = _meta() | {"skipped_records": 2}
+    out = render_report(_det(topics_evaluated=3), _agree(),
+                        JudgedMetrics(0, None, None, None), meta)
+    assert "Corpus records skipped for having no articles: 2" in out
+    assert "Topics evaluated: 3" in out
+
+
+def test_a_run_that_skipped_nothing_says_nothing():
+    out = render_report(_det(), _agree(), JudgedMetrics(0, None, None, None),
+                        _meta() | {"skipped_records": 0})
+    assert "skipped" not in out.lower(), "'0 skipped' is noise, not disclosure"
+
+
+def test_a_caller_that_omits_the_skipped_count_still_renders():
+    out = render_report(_det(), _agree(), JudgedMetrics(0, None, None, None), _meta())
+    assert "skipped" not in out.lower()
+    assert "Topics evaluated" in out
+
+
 def _row(out: str, label: str) -> str:
     """The value cell of the table row named ``label``."""
     matches = [line for line in out.splitlines() if line.startswith(f"| {label} |")]

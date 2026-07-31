@@ -23,13 +23,26 @@ def render_report(
     judged: JudgedMetrics,
     meta: dict[str, Any],
 ) -> str:
+    header = [
+        f"Generated: {meta.get('generated', 'unknown')}",
+        f"Extraction model: `{meta.get('model', 'unknown')}`",
+        f"Prompt version: `{meta.get('prompt_version', 'unknown')}`",
+        f"Topics evaluated: {deterministic.topics_evaluated}",
+    ]
+
+    # A reader comparing "topics evaluated" against the corpus deserves to see
+    # why the two differ, rather than finding the explanation on the stderr of
+    # a run they did not watch. Omitted entirely at zero: "0 skipped" is noise.
+    skipped = int(meta.get("skipped_records", 0) or 0)
+    if skipped:
+        header.append(
+            f"Corpus records skipped for having no articles: {skipped}"
+        )
+
     lines: list[str] = [
         "# Evaluation report",
         "",
-        f"Generated: {meta.get('generated', 'unknown')}  ",
-        f"Extraction model: `{meta.get('model', 'unknown')}`  ",
-        f"Prompt version: `{meta.get('prompt_version', 'unknown')}`  ",
-        f"Topics evaluated: {deterministic.topics_evaluated}",
+        *(f"{item}  " for item in header),
         "",
         "## Deterministic",
         "",

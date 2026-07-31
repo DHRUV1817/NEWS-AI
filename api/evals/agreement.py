@@ -16,6 +16,7 @@ will not match on the same data. See the note on ``DeterministicMetrics``.
 """
 
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from evals.golden import GoldenLabel, reviewed_only
@@ -24,6 +25,15 @@ from evals.metrics import ExtractionResult
 
 @dataclass
 class AgreementMetrics:
+    """How well the extraction agreed with the humans, and on how much.
+
+    ``labelled_coverage`` and ``total_labels`` both count *topics*, not label
+    rows, so the "N out of M" the report prints is a ratio of like to like. A
+    golden set holding two draft labels for one topic covers one topic, and
+    counting it as two would overstate the set the numbers are measured
+    against.
+    """
+
     labelled_coverage: int
     total_labels: int
     entity_precision: float | None
@@ -61,8 +71,37 @@ def cohens_kappa(rater_a: list[str], rater_b: list[str]) -> float | None:
     return (observed - expected) / (1.0 - expected)
 
 
-def _duplicate_topics(topics: list[str]) -> list[str]:
+def duplicate_topics(topics: Iterable[str]) -> list[str]:
+    """Topics appearing more than once, sorted."""
     return sorted(topic for topic, count in Counter(topics).items() if count > 1)
+
+
+def duplicate_topic_problem(topics: Iterable[str], subject: str) -> str | None:
+    """The complaint about duplicate topics in ``subject``, or ``None``.
+
+    Shared with ``evals.run`` so the runner can refuse a malformed input up
+    front, in the same words, without a second copy of the rule.
+    """
+    duplicates = duplicate_topics(topics)
+    if not duplicates:
+        return None
+    return (
+        f"duplicate topics in the {subject}: {', '.join(duplicates)}; "
+        f"each topic must appear exactly once"
+    )
+
+
+def unreviewed_duplicate_topics(labels: list[GoldenLabel]) -> list[str]:
+    """Topics duplicated in the golden set but not among its reviewed labels.
+
+    Not fatal, because nothing reported can be distorted by them: ``by_topic``
+    is built from reviewed labels only, and ``total_labels`` counts distinct
+    topics. They still say the file was hand-edited carelessly, so the runner
+    warns about them rather than staying silent.
+    """
+    everywhere = set(duplicate_topics(label.topic for label in labels))
+    fatal = set(duplicate_topics(label.topic for label in reviewed_only(labels)))
+    return sorted(everywhere - fatal)
 
 
 def agreement_metrics(
@@ -70,30 +109,34 @@ def agreement_metrics(
 ) -> AgreementMetrics:
     """Score predictions against human-reviewed labels only.
 
-    Duplicate topics are rejected rather than tolerated. A golden set with two
-    labels for one topic would silently keep the last and still count both in
-    ``total_labels``, understating how much of the set actually backs the
-    numbers; two results for one topic would both pair against the same label
+    Duplicate topics are rejected rather than tolerated. Two reviewed labels
+    for one topic would silently keep the last while both still counted toward
+    coverage; two results for one topic would both pair against the same label
     and double-count ``labelled_coverage``. Either way the reported denominator
     stops meaning what the report says it means, and quietly picking a winner
     is a worse answer than saying the input is malformed.
+
+    Only *reviewed* duplicates are fatal — an unreviewed duplicate is invisible
+    to every number here. ``evals.run`` warns about those instead, and runs the
+    same checks before spending a single token, so this raise is the backstop
+    for a direct caller rather than the first line of defence.
     """
-    duplicate_labels = _duplicate_topics([label.topic for label in labels])
-    if duplicate_labels:
-        raise ValueError(
-            "duplicate topics in the golden set: "
-            f"{', '.join(duplicate_labels)}; each topic needs exactly one label"
-        )
-
-    duplicate_results = _duplicate_topics([result.topic for result in results])
-    if duplicate_results:
-        raise ValueError(
-            "duplicate topics in the extraction results: "
-            f"{', '.join(duplicate_results)}; each topic is evaluated once"
-        )
-
     reviewed = reviewed_only(labels)
+
+    problem = duplicate_topic_problem(
+        (label.topic for label in reviewed), "reviewed golden set"
+    )
+    if problem:
+        raise ValueError(problem)
+
+    problem = duplicate_topic_problem(
+        (result.topic for result in results), "extraction results"
+    )
+    if problem:
+        raise ValueError(problem)
+
     by_topic = {label.topic: label for label in reviewed}
+    total_topics = len({label.topic for label in labels})
 
     paired = [
         (r, by_topic[r.topic])
@@ -104,7 +147,7 @@ def agreement_metrics(
     if not paired:
         return AgreementMetrics(
             labelled_coverage=0,
-            total_labels=len(labels),
+            total_labels=total_topics,
             entity_precision=None,
             entity_recall=None,
             entity_f1=None,
@@ -152,7 +195,7 @@ def agreement_metrics(
 
     return AgreementMetrics(
         labelled_coverage=len(paired),
-        total_labels=len(labels),
+        total_labels=total_topics,
         entity_precision=precision,
         entity_recall=recall,
         entity_f1=f1,

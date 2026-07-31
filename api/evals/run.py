@@ -2,6 +2,11 @@
 
 Human-invoked; not part of CI. A full run makes real API calls against the
 free tier, so it is rate-limited by the same limiter production uses.
+
+Every check that can reject the inputs runs *before* the first call. Tokens
+are the one irreversible thing this script spends, and a malformed golden set
+discovered afterwards would abort the run with the budget already gone, the
+deterministic metrics already computed and thrown away, and no report written.
 """
 
 import argparse
@@ -9,17 +14,71 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from evals.agreement import agreement_metrics
+from evals.agreement import (
+    agreement_metrics,
+    duplicate_topic_problem,
+    unreviewed_duplicate_topics,
+)
 from evals.corpus import CorpusRecord, load_corpus
-from evals.golden import load_golden
+from evals.golden import GoldenLabel, load_golden, reviewed_only
 from evals.judge import judged_metrics
 from evals.metrics import ExtractionResult, deterministic_metrics
 from evals.report import render_report
-from newsninja.analysis.client import StructuredClient
+from newsninja.analysis.client import GroqClient, StructuredClient
 from newsninja.analysis.extract import extract_topic
 from newsninja.errors import ExtractionFailure
 
 REPORT_DIR = Path(__file__).resolve().parents[2] / "docs" / "evals"
+
+EXIT_INVALID_INPUT = 2
+
+
+def validate_inputs(
+    records: list[CorpusRecord], labels: list[GoldenLabel]
+) -> list[str]:
+    """Every reason the inputs cannot produce trustworthy numbers.
+
+    The same duplicate rules ``agreement_metrics`` enforces, asked here first
+    so the answer costs nothing. ``agreement_metrics`` still raises for a
+    direct caller; this exists so the runner never learns about a malformed
+    input from a traceback thrown after the budget is spent.
+    """
+    problems = []
+
+    corpus_problem = duplicate_topic_problem(
+        (record.topic for record in records), "corpus"
+    )
+    if corpus_problem:
+        problems.append(corpus_problem)
+
+    golden_problem = duplicate_topic_problem(
+        (label.topic for label in reviewed_only(labels)), "reviewed golden set"
+    )
+    if golden_problem:
+        problems.append(golden_problem)
+
+    return problems
+
+
+def input_warnings(labels: list[GoldenLabel]) -> list[str]:
+    """Things worth saying out loud that are not worth refusing to run over."""
+    duplicates = unreviewed_duplicate_topics(labels)
+    if not duplicates:
+        return []
+    return [
+        (
+            f"duplicate unreviewed golden labels for: {', '.join(duplicates)}; "
+            f"they back no reported metric, but the file looks hand-edited"
+        )
+    ]
+
+
+def _build_client() -> GroqClient:
+    """Built only once the inputs are known good, so a malformed golden set
+    does not even need credentials to be rejected."""
+    from newsninja.config import Settings
+
+    return GroqClient(api_key=Settings().groq_api_key)
 
 
 def extract_results(
@@ -64,19 +123,32 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-judge", action="store_true", help="Skip the LLM judge.")
     args = parser.parse_args(argv)
 
-    from newsninja.analysis.client import GroqClient
     from newsninja.analysis.extract import DEFAULT_MODEL
     from newsninja.analysis.prompts import PROMPT_VERSION
-    from newsninja.config import Settings
 
-    settings = Settings()
-    client = GroqClient(api_key=settings.groq_api_key)
     records = load_corpus()
+    labels = load_golden()
+
+    for warning in input_warnings(labels):
+        print(f"warning: {warning}", file=sys.stderr)
+
+    problems = validate_inputs(records, labels)
+    if problems:
+        for problem in problems:
+            print(f"error: {problem}", file=sys.stderr)
+        print(
+            "aborted before any API call — nothing was spent, nothing to redo.",
+            file=sys.stderr,
+        )
+        return EXIT_INVALID_INPUT
+
+    client = _build_client()
+    skipped = [record.topic for record in records if not record.articles]
 
     results = extract_results(client, records)
 
     deterministic = deterministic_metrics(results)
-    agreement = agreement_metrics(results, load_golden())
+    agreement = agreement_metrics(results, labels)
     judged = judged_metrics(client, results) if not args.no_judge else judged_metrics(
         client, []
     )
@@ -87,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
             "generated": datetime.now(UTC).date().isoformat(),
             "model": DEFAULT_MODEL,
             "prompt_version": PROMPT_VERSION,
+            "skipped_records": len(skipped),
         },
     )
     print(report)

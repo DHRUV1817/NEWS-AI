@@ -121,6 +121,14 @@ All three are human-invoked and not part of CI; `evals.run` makes real Groq
 API calls against the free tier and is rate-limited by the same limiter
 production uses.
 
+`evals.run` validates the corpus and the golden set before it builds a client
+or spends a token: duplicate topics in either abort the run with exit code 2
+and a message naming them, having cost nothing. Duplicate labels a human has
+not reviewed only warn — they back no reported number. Topics whose capture
+found no articles are skipped rather than extracted, and the report's header
+says how many were skipped so `Topics evaluated` can be reconciled against the
+corpus.
+
 ## Not here yet
 
 No web UI. `api/evals/` (above) covers extraction quality; there is no

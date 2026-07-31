@@ -1,6 +1,10 @@
 import pytest
 
-from evals.agreement import agreement_metrics, cohens_kappa
+from evals.agreement import (
+    agreement_metrics,
+    cohens_kappa,
+    unreviewed_duplicate_topics,
+)
 from evals.golden import GoldenLabel
 from evals.metrics import ExtractionResult
 from newsninja.models import Article, ArticleAnalysis, Entity
@@ -124,13 +128,52 @@ def test_a_single_paired_topic_reports_no_kappa():
     assert m.stance_kappa is None
 
 
-def test_duplicate_golden_topics_are_rejected():
-    """Keeping the last label silently would still count both in
-    ``total_labels``, understating how much of the set backs the numbers."""
-    with pytest.raises(ValueError, match="duplicate topics in the golden set"):
+def test_duplicate_reviewed_golden_topics_are_rejected():
+    """Keeping the last label silently would score against a label the golden
+    set contradicts, with nothing in the report saying so."""
+    with pytest.raises(ValueError, match="duplicate topics in the reviewed golden set"):
         agreement_metrics([_result("ai", ["A"], "positive")],
                           [_label("ai", ["A"], "positive"),
                            _label("ai", ["B"], "negative")])
+
+
+def test_duplicate_unreviewed_golden_topics_are_tolerated():
+    """An unreviewed duplicate backs no reported number: it is filtered out
+    before pairing, and it cannot pad the coverage denominator either."""
+    m = agreement_metrics(
+        [_result("ai", ["A"], "positive")],
+        [_label("ai", ["A"], "positive"),
+         _label("ai", ["B"], "negative", reviewed=False),
+         _label("ai", ["C"], "neutral", reviewed=False)],
+    )
+    assert m.stance_accuracy == 1.0
+    assert m.labelled_coverage == 1
+    assert m.total_labels == 1, "three rows, one topic"
+
+
+def test_total_labels_counts_topics_so_it_is_comparable_to_coverage():
+    """The report prints "N out of M": both sides must count the same unit."""
+    m = agreement_metrics(
+        [_result("ai", ["A"], "positive")],
+        [_label("ai", ["A"], "positive"),
+         _label("ai", ["B"], "negative", reviewed=False),
+         _label("chips", ["D"], "neutral", reviewed=False)],
+    )
+    assert m.labelled_coverage == 1
+    assert m.total_labels == 2
+
+
+def test_unreviewed_duplicate_topics_are_reported_for_warning():
+    labels = [_label("ai", [], "positive"),
+              _label("chips", [], "neutral", reviewed=False),
+              _label("chips", [], "positive", reviewed=False)]
+    assert unreviewed_duplicate_topics(labels) == ["chips"]
+
+
+def test_a_duplicate_among_reviewed_labels_is_not_merely_a_warning():
+    """It is fatal, so it must not also be offered as something to shrug at."""
+    labels = [_label("ai", [], "positive"), _label("ai", [], "negative")]
+    assert unreviewed_duplicate_topics(labels) == []
 
 
 def test_duplicate_result_topics_are_rejected():
