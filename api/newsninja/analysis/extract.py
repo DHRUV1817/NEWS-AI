@@ -5,6 +5,7 @@ per topic and five topics, per-article calls would be forty requests and roughly
 32,000 tokens — well past the 8,000 TPM free-tier ceiling. Batching makes it five.
 """
 
+from newsninja.analysis.client import StructuredClient
 from newsninja.analysis.prompts import EXTRACT_SYSTEM, PROMPT_VERSION
 from newsninja.cache import Cache
 from newsninja.models import Article, ArticleAnalysis
@@ -33,7 +34,7 @@ def _empty(topic: str) -> ArticleAnalysis:
 
 
 def extract_topic(
-    client,
+    client: StructuredClient,
     topic: str,
     articles: list[Article],
     cache: Cache | None = None,
