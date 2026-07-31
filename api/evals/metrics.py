@@ -34,6 +34,15 @@ class DeterministicMetrics:
     ``text`` is fabricated but whose ``quote`` happens to be a real substring
     of the corpus still counts as grounded here. It is not a general
     hallucination detector — it is precisely ``1 - grounding_rate``.
+
+    ``mean_entities_per_topic`` counts every entity the model emitted,
+    duplicates included: a topic naming "Apple" four times contributes four.
+    It describes output volume, not distinct coverage. ``evals.agreement``
+    deliberately does the opposite — it case-folds entities into a set before
+    scoring precision and recall, so those same four emissions count once.
+    The two families therefore report different entity counts for identical
+    data, on purpose: one asks how much the model said, the other how much of
+    what it said was right.
     """
 
     topics_evaluated: int

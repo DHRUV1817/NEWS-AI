@@ -88,6 +88,14 @@ are reported separately because they carry different epistemic weight:
   the least objective family and is presented as one model's opinion, not
   ground truth.
 
+The two families count entities differently, on purpose. Agreement case-folds
+each topic's entities into a set before scoring, so a topic naming "Apple"
+four times contributes one entity and repetition cannot buy precision.
+`mean_entities_per_topic` counts every emission, so the same topic contributes
+four — it describes how much the model said, not how much of it was distinct.
+Expect the two numbers to disagree on identical data; neither is a typo for
+the other.
+
 The golden set (`evals/data/golden.jsonl`) is model-drafted and
 human-corrected: `python -m evals.bootstrap` drafts candidate labels with
 `gpt-oss-120b` for a human to review and correct, but every drafted label

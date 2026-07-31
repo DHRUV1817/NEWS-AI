@@ -70,6 +70,31 @@ def test_mean_counts_are_reported():
     assert m.mean_entities_per_topic == 3.0
 
 
+def test_means_divide_by_the_succeeded_topics_not_every_result():
+    """A failed extraction produced no claims and no entities. Averaging over
+    it would report the successful topics as thinner than they were."""
+    ok = ExtractionResult(topic="a", analysis=_analysis(["x", "y", "z"], entities=4),
+                          articles=[_article("x y z")], failed=False)
+    bad = ExtractionResult(topic="b", analysis=None, articles=[_article("q")], failed=True)
+    m = deterministic_metrics([ok, bad, bad])
+    assert m.topics_evaluated == 3
+    assert m.mean_claims_per_topic == 3.0
+    assert m.mean_entities_per_topic == 4.0
+
+
+def test_mean_entities_counts_every_emission_including_repeats():
+    """Deliberately unlike ``evals.agreement``, which case-folds entities into
+    a set: this metric describes output volume, not distinct coverage."""
+    analysis = ArticleAnalysis(
+        topic="ai", summary="s",
+        entities=[Entity(name=n, kind="org") for n in ("Apple", "apple", "APPLE", "Apple")],
+        stance="neutral", confidence=0.5, key_claims=[],
+    )
+    result = ExtractionResult(topic="ai", analysis=analysis,
+                              articles=[_article("x")], failed=False)
+    assert deterministic_metrics([result]).mean_entities_per_topic == 4.0
+
+
 def test_aggregate_grounding_matches_per_topic_formula_exactly():
     """The aggregate must use the same arithmetic shape as the per-topic
     ``newsninja.analysis.grounding.grounding_rate`` so a report citing both

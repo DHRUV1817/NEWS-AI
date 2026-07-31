@@ -56,6 +56,16 @@ def test_entity_matching_is_case_insensitive():
     assert m.entity_recall == 1.0
 
 
+def test_repeated_entities_are_deduplicated_before_scoring():
+    """Four emissions of one name score as one entity, so repetition cannot buy
+    precision. ``evals.metrics.mean_entities_per_topic`` counts all four — the
+    two families answer different questions and are documented as differing."""
+    m = agreement_metrics([_result("ai", ["Apple", "apple", "APPLE", "Apple"], "positive")],
+                          [_label("ai", ["Apple"], "positive")])
+    assert m.entity_precision == 1.0
+    assert m.entity_recall == 1.0
+
+
 def test_unreviewed_labels_are_ignored_entirely():
     m = agreement_metrics([_result("ai", ["A"], "positive")],
                           [_label("ai", ["A"], "positive", reviewed=False)])
@@ -90,3 +100,74 @@ def test_kappa_is_one_for_perfect_agreement_across_classes():
 def test_kappa_is_negative_for_systematic_disagreement():
     k = cohens_kappa(["a", "b"], ["b", "a"])
     assert k is not None and k < 0
+
+
+def test_kappa_uses_each_raters_own_marginals():
+    """Expected agreement multiplies rater A's class frequency by rater B's.
+    Using either rater's marginals twice is a different statistic."""
+    k = cohens_kappa(["a", "a", "a", "b"], ["a", "b", "b", "b"])
+    # observed 0.5; expected (3/4)(1/4) + (1/4)(3/4) = 0.375
+    assert k == pytest.approx(0.2)
+
+
+def test_kappa_is_unavailable_for_a_single_item():
+    """Kappa is undefined at n=1: there are no marginals to discount. The
+    arithmetic would return a confident 0.0 for a sample of one."""
+    assert cohens_kappa(["a"], ["b"]) is None
+    assert cohens_kappa(["a"], ["a"]) is None
+
+
+def test_a_single_paired_topic_reports_no_kappa():
+    m = agreement_metrics([_result("ai", ["A"], "positive")],
+                          [_label("ai", ["A"], "negative")])
+    assert m.stance_accuracy == 0.0
+    assert m.stance_kappa is None
+
+
+def test_duplicate_golden_topics_are_rejected():
+    """Keeping the last label silently would still count both in
+    ``total_labels``, understating how much of the set backs the numbers."""
+    with pytest.raises(ValueError, match="duplicate topics in the golden set"):
+        agreement_metrics([_result("ai", ["A"], "positive")],
+                          [_label("ai", ["A"], "positive"),
+                           _label("ai", ["B"], "negative")])
+
+
+def test_duplicate_result_topics_are_rejected():
+    """Two results for one topic would both pair against the same label and
+    double-count labelled coverage."""
+    with pytest.raises(ValueError, match="duplicate topics in the extraction results"):
+        agreement_metrics([_result("ai", ["A"], "positive"),
+                           _result("ai", ["B"], "negative")],
+                          [_label("ai", ["A"], "positive")])
+
+
+def test_entity_f1_is_the_harmonic_mean_not_the_arithmetic_one():
+    """Precision 0.5 and recall 1.0: harmonic 0.667, arithmetic 0.75. Only the
+    harmonic mean refuses to let a high recall paper over a low precision."""
+    m = agreement_metrics([_result("ai", ["A", "B", "C", "D"], "positive")],
+                          [_label("ai", ["A", "B"], "positive")])
+    assert m.entity_precision == pytest.approx(0.5)
+    assert m.entity_recall == pytest.approx(1.0)
+    assert m.entity_f1 == pytest.approx(2 / 3)
+
+
+def test_stance_accuracy_divides_by_the_paired_topics_only():
+    """Not by every result and not by every label: a failed extraction, an
+    unlabelled topic and an unreviewed label are all outside the denominator."""
+    results = [
+        _result("a", [], "positive"),
+        _result("b", [], "positive"),
+        ExtractionResult(topic="c", analysis=None, articles=[], failed=True),
+        _result("d", [], "positive"),
+    ]
+    labels = [
+        _label("a", [], "positive"),
+        _label("b", [], "negative"),
+        _label("c", [], "positive"),
+        _label("d", [], "positive", reviewed=False),
+        _label("z", [], "positive"),
+    ]
+    m = agreement_metrics(results, labels)
+    assert m.labelled_coverage == 2
+    assert m.stance_accuracy == 0.5, "1 of 2 paired topics agreed"

@@ -6,6 +6,13 @@ accuracy silently credits.
 
 Kappa is hand-rolled rather than imported so the harness needs no scientific
 stack for fifteen lines of arithmetic.
+
+Entities here are compared as case-folded *sets*: a topic whose extraction
+names "Apple" four times contributes one entity to precision and recall, so a
+model that repeats itself cannot buy agreement by volume. That is deliberately
+different from ``evals.metrics.mean_entities_per_topic``, which counts every
+emission — the two families answer different questions and their entity counts
+will not match on the same data. See the note on ``DeterministicMetrics``.
 """
 
 from collections import Counter
@@ -30,11 +37,13 @@ class AgreementMetrics:
 def cohens_kappa(rater_a: list[str], rater_b: list[str]) -> float | None:
     """Cohen's kappa. ``None`` when it is undefined.
 
-    Undefined happens when expected agreement is 1.0 — every item in one class
-    — where the statistic divides by zero. That is a real "cannot say", not a
-    zero.
+    Undefined happens two ways. Expected agreement of 1.0 — every item in one
+    class — divides by zero. And fewer than two items gives the marginals
+    nothing to describe: at n=1 with disagreement the arithmetic yields a tidy
+    0.0 that reads as "chance-level agreement, measured" when nothing was
+    measured at all. Both are a real "cannot say", not a zero.
     """
-    if not rater_a or len(rater_a) != len(rater_b):
+    if len(rater_a) < 2 or len(rater_a) != len(rater_b):
         return None
 
     n = len(rater_a)
@@ -52,10 +61,37 @@ def cohens_kappa(rater_a: list[str], rater_b: list[str]) -> float | None:
     return (observed - expected) / (1.0 - expected)
 
 
+def _duplicate_topics(topics: list[str]) -> list[str]:
+    return sorted(topic for topic, count in Counter(topics).items() if count > 1)
+
+
 def agreement_metrics(
     results: list[ExtractionResult], labels: list[GoldenLabel]
 ) -> AgreementMetrics:
-    """Score predictions against human-reviewed labels only."""
+    """Score predictions against human-reviewed labels only.
+
+    Duplicate topics are rejected rather than tolerated. A golden set with two
+    labels for one topic would silently keep the last and still count both in
+    ``total_labels``, understating how much of the set actually backs the
+    numbers; two results for one topic would both pair against the same label
+    and double-count ``labelled_coverage``. Either way the reported denominator
+    stops meaning what the report says it means, and quietly picking a winner
+    is a worse answer than saying the input is malformed.
+    """
+    duplicate_labels = _duplicate_topics([label.topic for label in labels])
+    if duplicate_labels:
+        raise ValueError(
+            "duplicate topics in the golden set: "
+            f"{', '.join(duplicate_labels)}; each topic needs exactly one label"
+        )
+
+    duplicate_results = _duplicate_topics([result.topic for result in results])
+    if duplicate_results:
+        raise ValueError(
+            "duplicate topics in the extraction results: "
+            f"{', '.join(duplicate_results)}; each topic is evaluated once"
+        )
+
     reviewed = reviewed_only(labels)
     by_topic = {label.topic: label for label in reviewed}
 
