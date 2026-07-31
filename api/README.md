@@ -155,7 +155,7 @@ A client makes N `/analyze` calls, then one `/brief`, then one `/audio`. Feed
 `/brief` the `analysis` object out of each `/analyze` response, not the response
 itself. `/brief` answers `{"briefing": {...}}`.
 
-Two bounds a caller meets as a `422`: `/brief` accepts at most 8,000 characters
+Two bounds a caller meets as a `422`: `/brief` accepts at most 9,000 characters
 of analysis text across the whole request, and both `/brief` and `/audio` accept
 only the twelve language codes the speech layer supports — a code outside that
 set would be silently spoken in English, so it is refused instead.

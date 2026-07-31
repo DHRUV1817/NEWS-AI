@@ -219,9 +219,13 @@ it wraps.
 field, not of its response body. A caller pipes `/analyze` output into `/brief` by
 plucking `.analysis` from each response; POSTing the response objects whole is a `422`.
 
-Their combined free text is capped at **8,000 characters** across the request. The count
-bound alone bounds nothing: four analyses with 6,000-character summaries reserve 7,737 of
-`gpt-oss-120b`'s 8,000 TPM, so one unauthenticated request holds 97% of the shared minute.
+Their combined free text is capped at **9,000 characters** across the request. The count
+bound alone bounds nothing: four analyses with 6,000-character summaries would still hold
+most of `gpt-oss-120b`'s 8,000 TPM in one unauthenticated request. 8,000 characters was
+measured to leave zero margin against a realistic five-topic run built from
+`evals/data/corpus.jsonl` (8,330 characters); 9,000 keeps genuine headroom over that while
+staying under half the TPM budget, per `newsninja/api/schemas.py`'s `MAX_BRIEF_CHARS`
+comment.
 
 `language` is validated against `^[a-z]{2}(-[A-Za-z]{2})?$` **and** against membership of
 `SUPPORTED_LANGUAGES`. It reaches a translation prompt, so it is not a free-text field;

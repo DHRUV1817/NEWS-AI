@@ -1,6 +1,9 @@
+import html
+
 import pytest
 from fastapi.testclient import TestClient
 
+from evals.corpus import load_corpus
 from newsninja.analysis.client import MODEL_TPM, GroqClient
 from newsninja.analysis.limiter import TokenBudgetLimiter
 from newsninja.analysis.synthesize import (
@@ -132,6 +135,77 @@ def test_a_maximal_brief_request_reserves_under_half_the_budget():
     assert limiter.used_tokens() < tpm // 2, (
         f"a maximal /brief request reserved {limiter.used_tokens()} of {tpm}"
     )
+
+
+def _realistic_five_topic_analyses() -> list[dict]:
+    """One analysis per corpus topic, built to look like real model output.
+
+    ``key_claims`` carry verbatim quotes copied straight out of the real
+    article bodies in evals/data/corpus.jsonl, because that is what
+    ``_text_chars`` counts and what a genuine extraction returns -- a claim
+    whose quote is invented text would not be measuring the same thing the
+    server actually holds in memory. Four claims per topic and a 2-4 sentence
+    summary is what the extract.md prompt asks for; this is not the maximum
+    the prompt allows, just a plausible five-topic run.
+    """
+    analyses = []
+    for record in load_corpus():
+        topic = record.topic
+        articles = record.articles[:4]
+        claims = [
+            {
+                "text": (
+                    f"Reporting from {article.source} covers a development in "
+                    f"{topic}: {article.title[:80]}."
+                ),
+                "quote": html.unescape(article.body),
+            }
+            for article in articles
+        ]
+        summary = (
+            f"Recent coverage of {topic} spans {len(record.articles)} sources this "
+            f'cycle. Notable developments include "{articles[0].title[:60]}" and '
+            f'"{articles[1].title[:60]}". Sentiment is mixed, with both '
+            "opportunity and risk emphasized across outlets, and no single source "
+            "dominating the narrative."
+        )
+        analyses.append(
+            {
+                "topic": topic,
+                "summary": summary,
+                "entities": [
+                    {"name": name, "kind": "org"}
+                    for name in ["Reuters", "Bloomberg", "AP"]
+                ],
+                "stance": "neutral",
+                "confidence": 0.72,
+                "key_claims": claims,
+            }
+        )
+    return analyses
+
+
+def test_a_realistic_five_topic_brief_request_is_accepted(client):
+    """The documented workflow is N x /analyze then one /brief; this is that
+    request for a genuine five-topic run, not a synthetic worst case.
+
+    Built from evals/data/corpus.jsonl rather than asserted: this measures
+    8,330 characters of text, which the old 8,000-character MAX_BRIEF_CHARS
+    would have rejected with a 422 on a request the documented workflow
+    produces legitimately.
+    """
+    payload = {"analyses": _realistic_five_topic_analyses()}
+
+    response = client.post("/brief", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["briefing"]["topics"] == [
+        "artificial intelligence",
+        "climate change",
+        "cryptocurrency",
+        "space exploration",
+        "renewable energy",
+    ]
 
 
 class RecordingClient:

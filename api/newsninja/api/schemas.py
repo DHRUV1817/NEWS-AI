@@ -48,20 +48,30 @@ Language = Annotated[
 MAX_SCRIPT_CHARS = 20_000
 
 #: Total caller-supplied text one /brief request may carry across all its
-#: analyses. Bounding the count without bounding the size bounds nothing:
-#: measured, four analyses with 6,000-character summaries reserve 7,737 of
-#: gpt-oss-120b's 8,000 TPM — 97% of the shared minute, from one unauthenticated
-#: request carrying analyses the server never produced. The per-IP window is no
-#: help there: one request a minute holds the whole budget at zero.
+#: analyses. Bounding the count without bounding the size bounds nothing: an
+#: unauthenticated request can carry analyses the server never produced, and
+#: the per-IP window is no help there: one request a minute holds the whole
+#: budget at zero.
+#:
+#: 8,000 was measured to have no headroom. Building realistic ArticleAnalysis
+#: objects from evals/data/corpus.jsonl — a plausible 2-4 sentence summary
+#: per topic, key_claims whose quotes are verbatim spans of the real article
+#: bodies, which is what a model actually returns and what _text_chars counts
+#: — a five-topic request measures 8,330 characters, already over the old
+#: 8,000 cap. test_a_realistic_five_topic_brief_request_is_accepted pins that
+#: construction so this comment cannot drift away from the code.
 #:
 #: GroqClient estimates four characters per token and adds
-#: EXPECTED_COMPLETION_TOKENS on top, so 8,000 characters reserves roughly
-#: 8000/4 + 1500 = 3,500 tokens — under half the minute, which leaves a second
-#: caller served rather than 429ed. It is also generous against what /analyze
-#: actually produces: 1,600 characters per analysis at the five-analysis
-#: maximum. test_a_maximal_brief_request_reserves_under_half_the_budget pins
-#: the arithmetic so this comment cannot drift away from the code.
-MAX_BRIEF_CHARS = 8_000
+#: EXPECTED_COMPLETION_TOKENS on top, so 9,000 characters reserves roughly
+#: 9000/4 + 1500 = 3,750 tokens — still under half of gpt-oss-120b's 8,000
+#: TPM, which leaves a second caller served rather than 429ed, and gives the
+#: measured 8,330-character realistic request genuine margin (670 characters,
+#: ~7%) rather than the zero the old bound left.
+#: test_a_maximal_brief_request_reserves_under_half_the_budget pins the actual
+#: reservation — it comes in above the naive estimate, at 3,920 tokens,
+#: because the estimate does not count the system prompt — so this comment
+#: cannot drift away from the code either.
+MAX_BRIEF_CHARS = 9_000
 
 
 def _text_chars(analysis: ArticleAnalysis) -> int:
