@@ -337,3 +337,7 @@ local_config.py
 !Pipfile
 !pyproject.toml
 !setup.pystreamlit/secrets.toml
+
+# Agent skills (installed via npx skills)
+.agents/
+.claude/skills/
