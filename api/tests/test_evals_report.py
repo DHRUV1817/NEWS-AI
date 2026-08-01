@@ -206,3 +206,81 @@ def test_deterministic_section_states_what_a_quote_is_checked_against():
     assert "title" in section.lower()
     assert "summary" in section.lower()
     assert "google news" in section.lower()
+
+
+def test_report_payload_carries_the_same_numbers_as_the_markdown():
+    """The JSON is the contract consumers read; the markdown is prose.
+
+    If they can drift apart, a page can show a number the report never
+    produced — the exact failure this project refuses everywhere else.
+    """
+    from evals.report import report_payload
+
+    deterministic = DeterministicMetrics(
+        topics_evaluated=3,
+        schema_valid_rate=1.0,
+        grounding_rate=0.75,
+        ungrounded_claim_rate=0.25,
+        total_claims=8,
+        total_ungrounded_claims=2,
+        mean_claims_per_topic=2.67,
+        mean_entities_per_topic=9.0,
+    )
+    agreement = AgreementMetrics(
+        labelled_coverage=0,
+        total_labels=5,
+        entity_precision=None,
+        entity_recall=None,
+        entity_f1=None,
+        stance_accuracy=None,
+        stance_kappa=None,
+        unavailable_reason="no reviewed labels",
+    )
+    judged = JudgedMetrics(
+        judged_count=0,
+        mean_coverage=None,
+        mean_neutrality=None,
+        mean_coherence=None,
+    )
+    meta = {"generated": "2026-08-01", "model": "m", "prompt_version": "1"}
+
+    payload = report_payload(deterministic, agreement, judged, meta)
+
+    assert payload["deterministic"]["grounding_rate"] == 0.75
+    assert payload["deterministic"]["total_claims"] == 8
+    assert payload["generated"] == "2026-08-01"
+    assert payload["skipped_records"] == 0
+
+
+def test_an_unmeasured_metric_stays_none_rather_than_becoming_zero():
+    """A zero reads as a measured result. The JSON must not invent one on the
+    way out — that would defeat the whole unavailable convention."""
+    from evals.report import report_payload
+
+    deterministic = DeterministicMetrics(
+        topics_evaluated=0,
+        schema_valid_rate=None,
+        grounding_rate=None,
+        ungrounded_claim_rate=None,
+        total_claims=0,
+        total_ungrounded_claims=0,
+        mean_claims_per_topic=None,
+        mean_entities_per_topic=None,
+    )
+    agreement = AgreementMetrics(
+        labelled_coverage=0,
+        total_labels=0,
+        entity_precision=None,
+        entity_recall=None,
+        entity_f1=None,
+        stance_accuracy=None,
+        stance_kappa=None,
+        unavailable_reason="nothing to compare",
+    )
+    judged = JudgedMetrics(0, None, None, None)
+
+    payload = report_payload(deterministic, agreement, judged, {})
+
+    assert payload["deterministic"]["grounding_rate"] is None
+    assert payload["agreement"]["stance_kappa"] is None
+    assert payload["judged"]["mean_coverage"] is None

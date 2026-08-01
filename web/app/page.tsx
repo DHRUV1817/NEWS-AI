@@ -1,8 +1,13 @@
 import Analyzer from "@/components/Analyzer";
 import Nav from "@/components/Nav";
 import Reveal from "@/components/Reveal";
+import { loadEvalReport, rate, type EvalReport } from "@/lib/evals";
 
-export default function Home() {
+export default async function Home() {
+  // Read at build time from the harness's own output. If it has never been
+  // run, the section says so rather than showing placeholder figures.
+  const report = await loadEvalReport();
+
   return (
     <>
       <Nav />
@@ -94,41 +99,72 @@ export default function Home() {
               written by hand.
             </p>
 
-            <table className="spec">
-              <caption className="spec__caption">
-                Deterministic metrics · arithmetic over extraction output and
-                its source articles. No model judges these.
-              </caption>
-              <tbody>
-                <SpecRow
-                  metric="Schema validity rate"
-                  value="measured"
-                  note="Fraction of calls returning schema-valid output."
-                />
-                <SpecRow
-                  metric="Claims counted"
-                  value="measured"
-                  note="Printed directly above the grounding rate, because a rate without its denominator is not a result."
-                />
-                <SpecRow
-                  metric="Quote grounding rate"
-                  value="measured"
-                  note="Fraction of claims whose quote appears verbatim in the source. Read it together with the claim count."
-                />
-                <SpecRow
-                  metric="Agreement with human labels"
-                  value="unavailable"
-                  note="0 of 5 golden labels reviewed. Only human-corrected labels may back this number; a validator refuses to let model-drafted output grade itself."
-                  pending
-                />
-                <SpecRow
-                  metric="Rubric-scored summary quality"
-                  value="unavailable"
-                  note="One model scoring another is reported separately, and is not ground truth."
-                  pending
-                />
-              </tbody>
-            </table>
+            {report ? (
+              <>
+                <table className="spec">
+                  <caption className="spec__caption">
+                    Deterministic · arithmetic over extraction output and its
+                    source articles. No model judges these. Run{" "}
+                    {report.generated} · model {report.model} · prompt v
+                    {report.prompt_version}
+                  </caption>
+                  <tbody>
+                    <SpecRow
+                      metric="Topics evaluated"
+                      value={String(report.deterministic.topics_evaluated)}
+                      note="Corpus records that had articles to extract from."
+                    />
+                    <SpecRow
+                      metric="Schema validity rate"
+                      value={rate(report.deterministic.schema_valid_rate)}
+                      note="Fraction of calls returning schema-valid output."
+                      pending={report.deterministic.schema_valid_rate === null}
+                    />
+                    <SpecRow
+                      metric="Claims counted"
+                      value={String(report.deterministic.total_claims)}
+                      note="The denominator under the rate below. A rate without it is not a result."
+                    />
+                    <SpecRow
+                      metric="Quote grounding rate"
+                      value={rate(report.deterministic.grounding_rate)}
+                      note="Fraction of claims whose quote appears verbatim in the source. Read it with the claim count, not alone."
+                      pending={report.deterministic.grounding_rate === null}
+                    />
+                    <SpecRow
+                      metric="Agreement with human labels"
+                      value={rate(report.agreement.stance_kappa)}
+                      note={
+                        report.agreement.unavailable_reason ??
+                        `Backed by ${report.agreement.labelled_coverage} reviewed labels.`
+                      }
+                      pending={report.agreement.stance_kappa === null}
+                    />
+                    <SpecRow
+                      metric="Rubric-scored summary quality"
+                      value={rate(report.judged.mean_coverage, 1)}
+                      note={
+                        report.judged.judged_count === 0
+                          ? "No summary judged in this run. One model scoring another is reported separately and is not ground truth."
+                          : `Mean coverage across ${report.judged.judged_count} summaries.`
+                      }
+                      pending={report.judged.mean_coverage === null}
+                    />
+                  </tbody>
+                </table>
+                <ReportNote report={report} />
+              </>
+            ) : (
+              <p className="notice notice--info">
+                <span className="notice__kind">not run</span>
+                <span>
+                  No report has been generated yet. Run{" "}
+                  <code className="code">python -m evals.run --report</code> and
+                  this table fills itself from the output — the page does not
+                  keep its own copy of the numbers.
+                </span>
+              </p>
+            )}
 
             <div className="caveat">
               <h3 className="caveat__head">The limit of the grounding claim</h3>
@@ -277,5 +313,18 @@ function Fact({ k, v }: { k: string; v: string }) {
       <span className="fact__k">{k}</span>
       <span className="fact__v">{v}</span>
     </li>
+  );
+}
+
+function ReportNote({ report }: { report: EvalReport }) {
+  const { grounding_rate, total_claims } = report.deterministic;
+  if (grounding_rate === null) return null;
+  return (
+    <p className="spec__foot">
+      That rate is computed over <strong>{total_claims}</strong> claims. The
+      denominator is shown because it changes what the rate means: a 1.00 over
+      three claims and a 0.81 over twenty-one are both real arithmetic, and only
+      one of them says much.
+    </p>
   );
 }

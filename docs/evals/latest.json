@@ -1,0 +1,32 @@
+{
+  "agreement": {
+    "entity_f1": null,
+    "entity_precision": null,
+    "entity_recall": null,
+    "labelled_coverage": 0,
+    "stance_accuracy": null,
+    "stance_kappa": null,
+    "total_labels": 5,
+    "unavailable_reason": "no reviewed labels matched the evaluated topics (0/5 labels reviewed)"
+  },
+  "deterministic": {
+    "grounding_rate": 1.0,
+    "mean_claims_per_topic": 2.4,
+    "mean_entities_per_topic": 13.4,
+    "schema_valid_rate": 1.0,
+    "topics_evaluated": 5,
+    "total_claims": 12,
+    "total_ungrounded_claims": 0,
+    "ungrounded_claim_rate": 0.0
+  },
+  "generated": "2026-08-01",
+  "judged": {
+    "judged_count": 0,
+    "mean_coherence": null,
+    "mean_coverage": null,
+    "mean_neutrality": null
+  },
+  "model": "openai/gpt-oss-20b",
+  "prompt_version": "1",
+  "skipped_records": 0
+}

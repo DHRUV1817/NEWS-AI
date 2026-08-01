@@ -1300,3 +1300,10 @@ kbd {
     width: 100%;
   }
 }
+
+.spec__foot {
+  margin-top: var(--space-2xs);
+  max-width: var(--measure);
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+}

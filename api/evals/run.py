@@ -10,6 +10,7 @@ deterministic metrics already computed and thrown away, and no report written.
 """
 
 import argparse
+import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,7 +24,7 @@ from evals.corpus import CorpusRecord, load_corpus
 from evals.golden import GoldenLabel, load_golden, reviewed_only
 from evals.judge import judged_metrics
 from evals.metrics import ExtractionResult, deterministic_metrics
-from evals.report import render_report
+from evals.report import render_report, report_payload
 from newsninja.analysis.client import GroqClient, StructuredClient
 from newsninja.analysis.extract import extract_topic
 from newsninja.errors import ExtractionFailure
@@ -153,22 +154,29 @@ def main(argv: list[str] | None = None) -> int:
         client, []
     )
 
-    report = render_report(
-        deterministic, agreement, judged,
-        {
-            "generated": datetime.now(UTC).date().isoformat(),
-            "model": DEFAULT_MODEL,
-            "prompt_version": PROMPT_VERSION,
-            "skipped_records": len(skipped),
-        },
-    )
+    meta = {
+        "generated": datetime.now(UTC).date().isoformat(),
+        "model": DEFAULT_MODEL,
+        "prompt_version": PROMPT_VERSION,
+        "skipped_records": len(skipped),
+    }
+    report = render_report(deterministic, agreement, judged, meta)
     print(report)
 
     if args.report:
         REPORT_DIR.mkdir(parents=True, exist_ok=True)
         path = REPORT_DIR / "latest.md"
         path.write_text(report, encoding="utf-8")
-        print(f"\nwritten to {path}", file=sys.stderr)
+
+        # A machine-readable sibling, so anything that displays these numbers
+        # reads a contract rather than parsing prose that changes whenever the
+        # wording improves.
+        payload = report_payload(deterministic, agreement, judged, meta)
+        data_path = REPORT_DIR / "latest.json"
+        data_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        print(f"\nwritten to {path} and {data_path}", file=sys.stderr)
 
     print(
         f"\ntokens: {client.usage.prompt_tokens} prompt / "
