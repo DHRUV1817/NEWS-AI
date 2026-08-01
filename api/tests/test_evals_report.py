@@ -9,8 +9,8 @@ from evals.report import _fmt, render_report
 def _det(**kw):
     base = {
         "topics_evaluated": 5, "schema_valid_rate": 1.0, "grounding_rate": 0.93,
-        "ungrounded_claim_rate": 0.07, "mean_claims_per_topic": 3.2,
-        "mean_entities_per_topic": 4.1,
+        "ungrounded_claim_rate": 0.07, "total_claims": 16, "total_ungrounded_claims": 1,
+        "mean_claims_per_topic": 3.2, "mean_entities_per_topic": 4.1,
     }
     base.update(kw)
     return DeterministicMetrics(**base)
@@ -100,6 +100,7 @@ def _distinct_render() -> str:
     wrong field cannot pass by coincidence."""
     return render_report(
         _det(schema_valid_rate=0.11, grounding_rate=0.22, ungrounded_claim_rate=0.33,
+             total_claims=9, total_ungrounded_claims=7,
              mean_claims_per_topic=4.4, mean_entities_per_topic=5.5),
         _agree(labelled_coverage=3, total_labels=5, entity_precision=0.61,
                entity_recall=0.72, entity_f1=0.83, stance_accuracy=0.94,
@@ -113,6 +114,7 @@ def _distinct_render() -> str:
     ("label", "value"),
     [
         ("Schema validity rate", "0.11"),
+        ("Claims counted", "9"),
         ("Quote grounding rate", "0.22"),
         ("Ungrounded claim rate", "0.33"),
         ("Mean claims per topic", "4.4"),
@@ -171,3 +173,36 @@ def test_a_missing_judged_mean_renders_unavailable_not_zero():
     out = render_report(_det(), _agree(), JudgedMetrics(6, 1.1, None, 3.3), _meta())
     assert _row(out, "Neutrality") == "unavailable"
     assert _row(out, "Coverage") == "1.1", "one missing axis must not blank the others"
+
+
+def test_a_perfect_rate_still_shows_how_few_claims_it_was_computed_over():
+    """The defect this change fixes: a grounding rate of 1.00 computed over a
+    handful of claims must never be printable without its denominator sitting
+    next to it, or it reads as "the model never hallucinates" instead of
+    "there was almost nothing to hallucinate about"."""
+    out = render_report(
+        _det(grounding_rate=1.0, ungrounded_claim_rate=0.0, total_claims=3,
+             total_ungrounded_claims=0, mean_claims_per_topic=0.6),
+        _agree(), JudgedMetrics(0, None, None, None), _meta(),
+    )
+    assert _row(out, "Quote grounding rate") == "1.00"
+    assert _row(out, "Claims counted") == "3"
+
+
+def test_zero_claims_renders_unavailable_rates_and_a_zero_count_without_crashing():
+    out = render_report(
+        _det(grounding_rate=None, ungrounded_claim_rate=None,
+             mean_claims_per_topic=None, total_claims=0, total_ungrounded_claims=0),
+        _agree(), JudgedMetrics(0, None, None, None), _meta(),
+    )
+    assert _row(out, "Quote grounding rate") == "unavailable"
+    assert _row(out, "Ungrounded claim rate") == "unavailable"
+    assert _row(out, "Claims counted") == "0", "zero counted is a fact, not a missing value"
+
+
+def test_deterministic_section_states_what_a_quote_is_checked_against():
+    out = render_report(_det(), _agree(), JudgedMetrics(0, None, None, None), _meta())
+    section = out.split("## Deterministic")[1].split("## Agreement")[0]
+    assert "title" in section.lower()
+    assert "summary" in section.lower()
+    assert "google news" in section.lower()
