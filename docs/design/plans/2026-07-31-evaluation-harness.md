@@ -1,6 +1,7 @@
 # NewsNinja Evaluation Harness — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Execute this plan task by task, reviewing each task before starting the next.
+> Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Measure what the extraction pipeline actually produces — schema validity, quote grounding, hallucination rate, entity precision/recall, stance agreement, and judged summary quality — and emit a committed report the README can cite.
 
@@ -8,7 +9,7 @@
 
 **Tech Stack:** Python 3.12, Pydantic v2, pytest, Groq (`openai/gpt-oss-120b` for judging). No new runtime dependencies — Cohen's κ is hand-rolled rather than pulling in scipy.
 
-This is **Plan 2 of 4**. Plan 1 (core package) is complete on `rebuild/core-package`. Source spec: `docs/superpowers/specs/2026-07-31-newsninja-portfolio-design.md` §6.
+This is **Plan 2 of 4**. Plan 1 (core package) is complete on `rebuild/core-package`. Source spec: `docs/design/specs/2026-07-31-newsninja-portfolio-design.md` §6.
 
 ## Global Constraints
 

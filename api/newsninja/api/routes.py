@@ -2,7 +2,7 @@
 
 Split along seams the package already has, so no single request runs long
 enough for a platform proxy to sever it. See
-docs/superpowers/specs/2026-07-31-fastapi-service-design.md for the token
+docs/design/specs/2026-07-31-fastapi-service-design.md for the token
 arithmetic that forces this shape.
 
 Every handler is a plain ``def`` rather than ``async def``, so FastAPI runs it

@@ -1,6 +1,7 @@
 # NewsNinja Core Analysis Package — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Execute this plan task by task, reviewing each task before starting the next.
+> Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a tested Python package that turns a list of topics into a structured, source-grounded news briefing with audio, running entirely on free-tier services.
 
@@ -8,7 +9,7 @@
 
 **Tech Stack:** Python 3.12, Pydantic v2, pydantic-settings, groq, praw, feedparser, gTTS, pytest, respx, uv.
 
-This is **Plan 1 of 4**. Later plans: eval harness, FastAPI service, Next.js frontend. Source spec: `docs/superpowers/specs/2026-07-31-newsninja-portfolio-design.md`.
+This is **Plan 1 of 4**. Later plans: eval harness, FastAPI service, Next.js frontend. Source spec: `docs/design/specs/2026-07-31-newsninja-portfolio-design.md`.
 
 ## Global Constraints
 

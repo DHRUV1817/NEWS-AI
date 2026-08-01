@@ -142,7 +142,7 @@ preference: `openai/gpt-oss-20b` allows 8,000 tokens per minute, one topic
 reserves roughly 2,400, and five topics reserve 11,787 — so a five-topic request
 sits in the token limiter for 48 seconds and no free-tier proxy will hold the
 connection. Measured against `evals/data/corpus.jsonl`; see
-`docs/superpowers/specs/2026-07-31-fastapi-service-design.md`.
+`docs/design/specs/2026-07-31-fastapi-service-design.md`.
 
 | Endpoint | Purpose |
 | --- | --- |
