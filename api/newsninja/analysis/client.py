@@ -13,7 +13,7 @@ from pydantic import BaseModel, ValidationError
 
 from newsninja.analysis.limiter import TokenBudgetLimiter
 from newsninja.analysis.schema import strict_schema
-from newsninja.errors import ExtractionFailure, RateLimitError
+from newsninja.errors import ExtractionFailure, RateLimitError, SchemaRejection
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -119,6 +119,36 @@ def _rate_limit_retry_after(exc: Exception) -> float:
     return parse_duration(value)
 
 
+def _schema_rejection_details(exc: Exception) -> tuple[str, str] | None:
+    """Pull ``(message, failed_generation)`` out of a provider schema-rejection.
+
+    Groq answers a strict-schema mismatch with an HTTP 400 whose body carries
+    ``code: "json_validate_failed"`` and the offending generation. The SDK
+    exposes that parsed body on ``exc.body``, but its shape is not part of any
+    contract, so every step here is defensive: returns ``None`` — meaning "not
+    a schema rejection" — for anything that does not match exactly, so a 400
+    for an unrelated reason (a malformed schema, a bad model name) still
+    propagates unchanged instead of being silently retried.
+    """
+    if getattr(exc, "status_code", None) != 400:
+        return None
+    body: Any = getattr(exc, "body", None)
+    if not isinstance(body, dict):
+        return None
+    error: Any = body.get("error")
+    if not isinstance(error, dict):
+        return None
+    if error.get("code") != "json_validate_failed":
+        return None
+    message = error.get("message")
+    if not isinstance(message, str) or not message:
+        message = str(exc)
+    failed_generation = error.get("failed_generation")
+    if not isinstance(failed_generation, str):
+        failed_generation = ""
+    return message, failed_generation
+
+
 class GroqTransport:
     def __init__(self, api_key: str) -> None:
         from groq import Groq
@@ -138,6 +168,15 @@ class GroqTransport:
             # catch it; anything else propagates unchanged.
             if getattr(exc, "status_code", None) == 429:
                 raise RateLimitError(str(exc), _rate_limit_retry_after(exc)) from exc
+            # A strict-schema mismatch is a server-side ``ExtractionFailure``:
+            # the model produced JSON, the schema refused it, no content came
+            # back. That must reach ``GroqClient.structured``'s retry loop the
+            # same way a local ``ValidationError`` does, not escape as a raw
+            # SDK exception.
+            details = _schema_rejection_details(exc)
+            if details is not None:
+                message, failed_generation = details
+                raise SchemaRejection(message, failed_generation) from exc
             raise
         headers = {str(name).lower(): str(value) for name, value in raw.headers.items()}
         response = raw.parse()
@@ -262,10 +301,38 @@ class GroqClient:
 
         last_error = ""
         for attempt in range(max_retries + 1):
+            # Booked before the call, not settled if the provider rejects the
+            # generation (see the SchemaRejection branch below): the estimate
+            # stands for the window on a rejection because the provider still
+            # spent those tokens producing the output it then refused.
             reservation = self._reserve(model, system + user)
-            content, usage, headers = self._transport.complete(
-                model=model, messages=messages, response_format=response_format
-            )
+            try:
+                content, usage, headers = self._transport.complete(
+                    model=model, messages=messages, response_format=response_format
+                )
+            except SchemaRejection as exc:
+                # The provider's own strict-schema check rejected the
+                # generation server-side — no content, no usage, so there is
+                # nothing to record or settle. This is the server-side twin of
+                # the ValidationError branch below: same retry budget, same
+                # correction-message shape, fed from the provider's message
+                # and the generation it refused instead of local parsing.
+                last_error = str(exc)
+                if attempt == max_retries:
+                    break
+                messages = messages + [
+                    {"role": "assistant", "content": exc.failed_generation},
+                    {
+                        "role": "user",
+                        "content": (
+                            "That response failed schema validation with the "
+                            f"following errors:\n{last_error}\n"
+                            "Return corrected JSON matching the schema exactly."
+                        ),
+                    },
+                ]
+                continue
+
             self._record(usage)
             self._settle(model, reservation, usage, headers)
 
