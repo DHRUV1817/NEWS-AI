@@ -94,3 +94,51 @@ jobs:
       - name: Stop it
         if: always()
         run: docker rm -f nn-ci || true
+
+  # The site was merged with no job of its own, so a broken page compiled only
+  # on someone's laptop. It also renders its evaluation numbers from
+  # docs/evals/latest.json at build time — and a missing file there degrades
+  # silently to a "not run" state rather than failing, which is precisely the
+  # kind of quiet wrong answer this project refuses everywhere else.
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # ci, not install: the lock file is the contract, and a resolution that
+      # drifts in CI is a build that does not match the one reviewed.
+      - name: Install
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx eslint .
+
+      - name: Build
+        run: npm run build
+
+      # Asserts the page actually rendered the harness's numbers. A build that
+      # succeeds while quietly falling back to "not run" would otherwise ship
+      # a page claiming nothing has been measured when the report is right
+      # there in the repository.
+      - name: The page carries the published eval numbers
+        run: |
+          page=.next/server/app/index.html
+          test -f "$page" || { echo "no prerendered page at $page"; exit 1; }
+          grep -q "Claims counted" "$page"
+          grep -q "Quote grounding rate" "$page"
+          if grep -q "No report has been generated yet" "$page"; then
+            echo "page fell back to the not-run state despite docs/evals/latest.json being committed"
+            exit 1
+          fi
