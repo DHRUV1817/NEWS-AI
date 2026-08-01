@@ -46,6 +46,11 @@ eggs/
 .eggs/
 lib/
 lib64/
+# ...but web/lib/ is the site's source, not a Python build artifact. The rule
+# above is from the Python section and silently dropped two modules the page
+# imports, so CI type-checked a tree that was missing them.
+!web/lib/
+!web/lib/**
 parts/
 sdist/
 var/

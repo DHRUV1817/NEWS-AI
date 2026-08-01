@@ -83,7 +83,7 @@ uv run --python 3.12 --extra dev mypy newsninja evals
 
 `uv` 0.11.7 is installed with cpython-3.12.13 already available.
 
-### The `.gitignore` is hostile — seven landmines found so far
+### The `.gitignore` is hostile — eight landmines found so far
 
 It was written to exclude broad categories and keeps swallowing legitimate source files.
 Each was fixed with a scoped negation, but **expect more**. Always run
@@ -98,6 +98,7 @@ Each was fixed with a scoped negation, but **expect more**. Always run
 | `.dockerignore` | `api/.dockerignore` build context | scoped negation |
 | `.env*` (in `web/`) | `web/.env.local.example` template | scoped negation |
 | `*.json` | `docs/evals/latest.json` published report | scoped negation |
+| `lib/` (Python section) | `web/lib/` site source modules | scoped negation |
 
 ---
 
