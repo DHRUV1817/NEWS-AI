@@ -26,3 +26,71 @@ jobs:
         run: uv run --python 3.12 --extra dev pytest --cov=newsninja --cov-report=term-missing
         env:
           GROQ_API_KEY: test-key-not-real
+
+  # The suite cannot see container defects: it imports the package directly and
+  # never builds an image. Writing the Dockerfile surfaced three failures that
+  # only appear at build or start time — an empty virtualenv, a package copied
+  # but never installed, and an editable install pointing at a build directory
+  # the runtime stage does not have. Each produced a container that exited
+  # immediately while every test stayed green. This job is what keeps the
+  # README's claim that the service is deployable from quietly going stale.
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t newsninja-api:ci api
+
+      - name: Start it
+        run: |
+          docker run -d --name nn-ci -p 7860:7860 \
+            -e GROQ_API_KEY=test-key-not-real \
+            newsninja-api:ci
+
+      # Polls rather than sleeping a fixed interval: a fixed wait is either
+      # slower than it needs to be or flaky on a loaded runner.
+      - name: Wait for it to serve
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:7860/health >/dev/null 2>&1; then
+              echo "serving"; exit 0
+            fi
+            sleep 1
+          done
+          echo "did not serve within 30s"; docker logs nn-ci; exit 1
+
+      # Asserts the version came from package metadata. A container that copies
+      # the source without installing it starts and then dies here, which is
+      # exactly the failure this job exists to catch.
+      - name: Health reports the packaged version
+        run: |
+          body=$(curl -fsS http://127.0.0.1:7860/health)
+          echo "$body"
+          echo "$body" | grep -q '"status":"ok"'
+          echo "$body" | grep -qE '"version":"[0-9]+\.[0-9]+\.[0-9]+"'
+
+      # An invalid body must produce the shared error envelope, not FastAPI's
+      # default {"detail": [...]}. Checked against the running container rather
+      # than the test client, since the two load the app differently.
+      #
+      # This doubles as the readiness check /health cannot be. FastAPI resolves
+      # a route's dependencies before validating its body, so reaching a 422 on
+      # /analyze proves the model client was constructed — the step that fails
+      # on a bad key or an unparseable proxy variable while /health stays green.
+      - name: Invalid request returns the shared envelope
+        run: |
+          code=$(curl -s -o /tmp/body.json -w '%{http_code}' \
+            -X POST http://127.0.0.1:7860/analyze \
+            -H 'Content-Type: application/json' -d '{}')
+          cat /tmp/body.json
+          test "$code" = "422"
+          grep -q '"type":"invalid_request"' /tmp/body.json
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs nn-ci
+
+      - name: Stop it
+        if: always()
+        run: docker rm -f nn-ci || true
