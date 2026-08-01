@@ -5,14 +5,18 @@ import {
   analyze,
   audio,
   brief,
-  ApiError,
-  NetworkError,
   LANGUAGES,
   MAX_TOPICS,
   type AnalyzeResponse,
-  type ArticleAnalysis,
   type Briefing,
 } from "@/lib/api";
+import {
+  addTopic as addTopicTo,
+  runBriefing,
+  type Failure,
+  type Phase,
+  type TopicRow,
+} from "@/lib/briefing";
 
 /* One topic per /analyze call, then every analysis handed to /brief at once.
  * That shape is the product: build_briefing writes across the analyses, so
@@ -23,23 +27,6 @@ import {
  * and per-minute, so firing five at once would not finish sooner — it would
  * just collide, and the failures would be less legible. */
 
-type TopicStatus = "queued" | "running" | "done" | "failed";
-
-interface TopicRow {
-  topic: string;
-  status: TopicStatus;
-  result?: AnalyzeResponse;
-  error?: Failure;
-}
-
-interface Failure {
-  kind: string;
-  message: string;
-  retryAfter?: number;
-}
-
-type Phase = "idle" | "analyzing" | "briefing" | "speaking" | "done";
-
 const STARTERS = [
   "artificial intelligence",
   "renewable energy",
@@ -47,19 +34,6 @@ const STARTERS = [
   "cryptocurrency",
   "climate change",
 ];
-
-function describe(error: unknown): Failure {
-  if (error instanceof ApiError) {
-    return { kind: error.kind, message: error.message, retryAfter: error.retryAfter };
-  }
-  if (error instanceof NetworkError) {
-    return { kind: "unreachable", message: error.message };
-  }
-  return {
-    kind: "unknown",
-    message: error instanceof Error ? error.message : String(error),
-  };
-}
 
 export default function Analyzer() {
   const [topics, setTopics] = useState<string[]>(["artificial intelligence"]);
@@ -84,14 +58,7 @@ export default function Analyzer() {
     (value: string) => {
       const trimmed = value.trim();
       if (!trimmed) return;
-      setTopics((current) => {
-        if (current.length >= MAX_TOPICS) return current;
-        // Duplicates would spend a call to say the same thing twice.
-        if (current.some((t) => t.toLowerCase() === trimmed.toLowerCase())) {
-          return current;
-        }
-        return [...current, trimmed];
-      });
+      setTopics((current) => addTopicTo(current, trimmed).topics);
       setDraft("");
     },
     [],
@@ -112,54 +79,26 @@ export default function Analyzer() {
     }
     setAudioUrl(null);
 
-    const working: TopicRow[] = topics.map((topic) => ({ topic, status: "queued" }));
-    setRows(working);
-    setPhase("analyzing");
+    const outcome = await runBriefing(
+      topics,
+      language,
+      { analyze, brief, audio },
+      (progress, current) => {
+        setRows(progress);
+        setPhase(current);
+      },
+    );
 
-    /* A topic that fails does not abort the run. Five topics reserve more than
-     * the per-minute budget allows, so a later one refusing with a rate limit
-     * is an expected outcome, not a crash — the briefing is built from whatever
-     * succeeded, and the page says which did not. */
-    for (let i = 0; i < working.length; i += 1) {
-      working[i] = { ...working[i], status: "running" };
-      setRows([...working]);
-      try {
-        const result = await analyze(working[i].topic);
-        working[i] = { ...working[i], status: "done", result };
-      } catch (error) {
-        working[i] = { ...working[i], status: "failed", error: describe(error) };
-      }
-      setRows([...working]);
-    }
+    setRows(outcome.rows);
+    setBriefing(outcome.briefing);
+    setFatal(outcome.failure);
 
-    const analyses: ArticleAnalysis[] = working
-      .filter((row) => row.result)
-      .map((row) => row.result!.analysis);
-
-    if (analyses.length === 0) {
-      setFatal({
-        kind: "nothing_to_brief",
-        message:
-          "Every topic failed, so there is nothing to synthesise. The per-topic errors are listed above.",
-      });
-      setPhase("idle");
-      return;
-    }
-
-    try {
-      setPhase("briefing");
-      const briefed = await brief(analyses, language);
-      setBriefing(briefed.briefing);
-
-      setPhase("speaking");
-      const spoken = await audio(briefed.briefing.script, briefed.briefing.language);
-      const url = URL.createObjectURL(spoken.blob);
+    if (outcome.audio) {
+      const url = URL.createObjectURL(outcome.audio.blob);
       objectUrl.current = url;
       setAudioUrl(url);
-
       setPhase("done");
-    } catch (error) {
-      setFatal(describe(error));
+    } else {
       setPhase("idle");
     }
   }, [topics, language]);

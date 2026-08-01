@@ -125,6 +125,14 @@ jobs:
       - name: Lint
         run: npx eslint .
 
+      # The run's orchestration lives in lib/briefing.ts rather than the
+      # component, so the part worth testing — a refused topic not taking the
+      # run down, and never briefing on an empty list — is exercised without a
+      # browser. Mutation-checked: aborting on failure, briefing anyway, and
+      # running topics concurrently each turn the suite red.
+      - name: Test
+        run: npm test
+
       - name: Build
         run: npm run build
 
