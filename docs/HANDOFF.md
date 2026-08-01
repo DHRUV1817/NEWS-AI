@@ -52,20 +52,27 @@ never entered git history (verified repeatedly). Do not read, print, or echo it.
 | 1 | Core analysis package | **Merged to `main`** (PR #1) |
 | 2 | Evaluation harness | **Merged to `main`** (PR #3) |
 | 3 | FastAPI service | **Merged to `main`** (PR #3, bundled with Plan 2) |
-| 4 | Next.js frontend | Not started — design locked in §8 |
+| 4 | Next.js frontend | **Merged to `main`** (PR #10, extended by #11) |
 
-**Tests: 328 passing**, all offline. `ruff` clean. `mypy --strict` clean across 37 files
-with **zero `type: ignore`** and exactly **one `# noqa`** (`BLE001, S110` on the
-intentional Orpheus fallback in `newsninja/audio/tts.py`). Preserve all three properties.
+Also merged since: a container and a Render blueprint, CI jobs for the container and
+the site, the eval report published as JSON and rendered by the page, and tests for the
+run's orchestration.
+
+**Tests: 347 Python + 14 site**, all offline — no test makes a network call. `ruff`
+clean. `mypy --strict` clean across 37 files with **zero `type: ignore`** and exactly
+**one `# noqa`** (`BLE001, S110` on the intentional Orpheus fallback in
+`newsninja/audio/tts.py`). Preserve all three properties.
+
+CI runs three jobs: the Python suite, a container build with a smoke test, and a site
+build that fails if the page stops publishing the eval numbers.
 
 Specs and plans live in `docs/design/specs/` and `docs/design/plans/`.
 
 ### Immediate next action
 
-**Correct the golden labels** — §9 item 2. Everything else is built; the eval harness is
-the differentiator and it still reports `unavailable` for its headline metrics. Plan 4
-(frontend) can start in parallel, but it will have no eval numbers to display until this
-is done.
+**Correct the golden labels** — §9 item 2. Everything buildable is built and the whole
+chain runs end to end; the eval harness is the differentiator and it still reports
+`unavailable` for agreement. Nothing else in the repository is waiting on code.
 
 ---
 
@@ -185,6 +192,14 @@ api/
     agreement.py judge.py report.py run.py
     data/corpus.jsonl # 40 real articles, 5 topics — committed on purpose
   tests/              # all network mocked
+  Dockerfile          # the deployable image; CI builds and smoke-tests it
+web/                  # the page that runs the service
+  app/                # layout, the single page
+  components/         # Nav with a working command palette, Analyzer, Reveal
+  lib/                # api client, briefing orchestration (tested), eval reader
+  styles/tokens.css   # every colour and font resolves through here
+render.yaml           # service blueprint
+docs/evals/           # latest.md and latest.json — the page reads the JSON
 ```
 
 **Invariants that took three review rounds to secure — do not weaken:**
@@ -242,10 +257,10 @@ characters — derived from measuring a realistic five-topic run at 8,330.
 
 ---
 
-## 8. Plan 4 — Frontend design (locked, not started)
+## 8. Plan 4 — Frontend (built; the design that produced it)
 
-Worked through a structured design pass; the cached pre-flight lives outside the repo.
-These picks are settled:
+Built and merged. Recorded here because the picks below are what the page implements,
+and a later change should either follow them or say why it does not.
 
 - **Genre:** modern-minimal. The brief fired both "AI tool" (atmospheric) and "API/dev
   tool" (modern-minimal); the technical tone resolved it. Atmospheric would read as a
@@ -277,16 +292,29 @@ that is the portfolio centerpiece for AI/ML roles.
 
 1. **Rotate the Groq API key** at console.groq.com. It never entered git history, but it
    appeared in a chat transcript and the repo is public.
-2. **Correct the drafted golden labels.** Run `python -m evals.bootstrap`, then edit
-   `api/evals/data/golden.jsonl`, setting `reviewed: true` and
-   `provenance: "human-corrected"` on each label you fix. **Until this happens the
-   Agreement section renders `unavailable` and the project's strongest claim is
-   unmeasured.** The bootstrapper is non-destructive — re-running preserves reviewed
-   labels.
-3. **Run `python -m evals.run --report`** once labels exist, to produce
-   `docs/evals/latest.md`. Only then may either README cite a number.
-4. **Create a Reddit script app** at reddit.com/prefs/apps if you want that source live.
-5. **Accept Orpheus terms** at console.groq.com if you want neural TTS.
+2. **Correct the drafted golden labels.** The bootstrapper has been run: five drafts
+   sit in `api/evals/data/golden.jsonl`, all `reviewed: false`. Edit them, setting
+   **both** `reviewed: true` and `provenance: "human-corrected"` — setting only the
+   first fails validation, deliberately, so model output cannot grade itself.
+   **Until this happens the Agreement section renders `unavailable`, on the deployed
+   page as well as in the report, and the project's strongest claim is unmeasured.**
+   Re-running the bootstrapper preserves reviewed labels.
+
+   Worth knowing before you start: the drafts list news outlets as entities of the
+   story (`The Guardian`, `Bloomberg.com`) alongside things that are not entities at
+   all (`wind`, `solar`, `lawmakers`).
+3. **Run `python -m evals.run --report`** after correcting them. It rewrites
+   `docs/evals/latest.md` and `latest.json`; the page renders from the JSON, so the
+   numbers reach the site by committing the file, not by editing the page.
+4. **Deploy.** `render.yaml` describes the service and `web/README.md` the site.
+   Order matters: deploy the service, deploy the site with `NEXT_PUBLIC_API_URL`
+   pointing at it, then put the site's origin into the service's `ALLOWED_ORIGINS`.
+   Skip that last step and the page loads while every call fails at the browser.
+5. **Create a Reddit script app** at reddit.com/prefs/apps if you want that source
+   live. Worth more than one extra source: `selftext` is real prose, and it is the
+   only plausible route to making the grounding claim mean more than headline
+   matching — see §5 on why the feed carries no article bodies.
+6. **Accept Orpheus terms** at console.groq.com if you want neural TTS.
 
 ---
 
@@ -299,11 +327,16 @@ import, and the README documented a different project.
 It is now a well-engineered project: real constrained decoding, quote grounding as an
 actual substring check, tiered routing under measured rate limits, a genuine evaluation
 harness, a thread-safe HTTP service whose shape is derived from a measured token ceiling,
-328 offline tests, mypy strict throughout.
+a page that runs that service rather than depicting it, a container CI smoke-tests on
+every push, 361 offline tests, mypy strict throughout.
 
 **It is not yet the 7.5–8/10 target**, and the gap is item 2 above. The eval harness is
 the differentiator, and an eval harness with no numbers proves nothing. Everything else is
-built.
+built and nothing else is waiting on code.
+
+One thing to go in with eyes open: quote grounding is checked against headline and feed
+summary text, because the free news feed carries no article prose. That is stated on the
+report's own face and on the page, and it is why item 5 is worth more than it looks.
 
 It will not reach 9–10, and the design says so plainly: that tier needs novel research,
 real scale, or real users. This is excellent *engineering*, not novel work — which is what
