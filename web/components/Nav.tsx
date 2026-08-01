@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { API_BASE } from "@/lib/api";
 
 /* N13 · inline ⌘K pill. The affordance is on the surface for newcomers and the
  * shortcut is there for everyone else. Shipping the pill means shipping the
@@ -19,8 +20,11 @@ const COMMANDS: Command[] = [
   { group: "On this page", label: "How the pipeline works", hint: "four stages", href: "#pipeline" },
   { group: "On this page", label: "What is measured", hint: "and what is not", href: "#evaluation" },
   { group: "On this page", label: "Architecture", hint: "package layout", href: "#architecture" },
-  { group: "Service", label: "OpenAPI schema", hint: "/openapi.json", href: "http://127.0.0.1:8000/openapi.json" },
-  { group: "Service", label: "Interactive API docs", hint: "/docs", href: "http://127.0.0.1:8000/docs" },
+  /* Built from the configured service, not a literal — these pointed at a
+     developer's own machine and would have been dead links the moment the page
+     was hosted anywhere. */
+  { group: "Service", label: "OpenAPI schema", hint: "/openapi.json", href: `${API_BASE}/openapi.json` },
+  { group: "Service", label: "Interactive API docs", hint: "/docs", href: `${API_BASE}/docs` },
   { group: "Source", label: "Repository", hint: "github.com/DHRUV1817", href: "https://github.com/DHRUV1817/NEWS-AI" },
 ];
 

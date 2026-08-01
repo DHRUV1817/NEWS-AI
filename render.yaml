@@ -1,0 +1,53 @@
+# Render blueprint for the HTTP service. Render reads this from the repository
+# root; the image itself is api/Dockerfile, which CI builds and smoke-tests on
+# every push, so what deploys here is what was verified there.
+#
+# The frontend is not described here. It is a static Next.js build and belongs
+# on Vercel, per the design — see web/README.md for that half.
+
+services:
+  - type: web
+    name: newsninja-api
+    runtime: docker
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: ./api
+    plan: free
+    region: oregon
+
+    # Render injects PORT; the image reads it and falls back to 7860 for
+    # Hugging Face Spaces, so neither platform needs a special build.
+    healthCheckPath: /health
+
+    envVars:
+      # Set in the dashboard, never here. sync: false keeps the blueprint from
+      # claiming to manage a value it must not contain.
+      - key: GROQ_API_KEY
+        sync: false
+
+      # The deployed frontend's origin. Empty means no cross-origin access,
+      # which is the safe failure — the page cannot call the service until this
+      # names it, rather than the service accepting anyone by default.
+      - key: ALLOWED_ORIGINS
+        sync: false
+
+      # Render terminates TLS at its edge and sets X-Forwarded-For, so the
+      # per-IP window buckets on the visitor rather than on Render's proxy.
+      # Left false and this limits every visitor as one client.
+      - key: TRUST_PROXY_HEADERS
+        value: "true"
+
+      # The shared token budget allows roughly three analyses per minute in
+      # total, so a generous per-IP allowance is not the binding constraint —
+      # the limiter's wait ceiling is. This bounds one client hammering it.
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "10"
+
+      # How long a request may sit inside the token limiter before the service
+      # answers 429. Kept well under Render's proxy timeout so the caller gets
+      # a real answer with a Retry-After rather than a severed connection.
+      - key: API_MAX_WAIT_SECONDS
+        value: "5.0"
+
+    # A free instance sleeps when idle and is recycled freely. The SQLite
+    # response cache lives on container-local disk and does not survive that;
+    # it is a warm cache for one container's life, not durable state.
