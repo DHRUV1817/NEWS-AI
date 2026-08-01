@@ -134,6 +134,21 @@ free script app the owner has not yet created.
 
 **Google News RSS** and the **gTTS** endpoint both return 200, unauthenticated.
 
+**Google News RSS carries no article prose, and its links do not resolve to publishers.**
+The feed's `summary` is the headline plus publisher, so `google_news.py` builds `body` from
+what amounts to a duplicated headline — median body across the 40-article corpus is **195
+characters**. Following an RSS link returns a Google News shell page: measured at 598 KB of
+HTML containing 11 characters of visible text. Real article text would need either decoding
+Google's undocumented article IDs or driving a headless browser; switching to publisher
+feeds that carry full text would work but gives up free topic search.
+
+This is why the first live eval run reported a **quote grounding rate of 1.00 over three
+claims total**. The extraction prompt says to omit any claim it cannot quote verbatim, and
+with only headlines to quote from, the model correctly abstains. The rate is real
+arithmetic and nearly vacuous. The report now prints `Claims counted` directly above it and
+states what a quote is checked against — do not remove either, and **do not let any README
+cite a grounding rate without its denominator.**
+
 **Cloudflare blocks `python-urllib`'s user agent** on the Groq API — use `curl` or `httpx`
 with a normal UA for ad-hoc probing.
 
