@@ -1,6 +1,7 @@
 # FastAPI Service Implementation Plan (Plan 3)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Execute this plan task by task, reviewing each task before starting the next.
+> Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Put an HTTP layer over the existing analysis package so the Plan 4 frontend has something to call, with no request long enough for a free-tier proxy to sever.
 
@@ -8,12 +9,12 @@
 
 **Tech Stack:** Python 3.12, FastAPI, uvicorn, pydantic v2, pydantic-settings, pytest. All commands run through `uv`.
 
-**Spec:** `docs/superpowers/specs/2026-07-31-fastapi-service-design.md`
+**Spec:** `docs/design/specs/2026-07-31-fastapi-service-design.md`
 
 ## Global Constraints
 
 - **Every command runs through `uv`.** System Python is 3.9.6 and cannot import this project's dependencies. Use `uv run --python 3.12 --extra dev <cmd>` from the `api/` directory. Never invoke bare `python` or `pytest`.
-- **Never mention Claude, Anthropic, or AI tooling** in commit messages, code comments, or documentation. No `Co-Authored-By` trailers, no "Generated with" footers.
+- **No third-party attribution** in commit messages, code comments, or documentation — name no tool, vendor, or assistant, only the author. No `Co-Authored-By` trailers, no "Generated with" footers. This binds the documents themselves: they are committed to a public repository.
 - **Commit subjects are descriptive sentences**, matching existing history ("Add eval runner, markdown report, and documentation"). Do **not** use `feat:` / `fix:` conventional-commit prefixes — this repo does not use them.
 - **`mypy --strict` must stay clean with zero `type: ignore`.** Verify with `uv run --python 3.12 --extra dev mypy newsninja evals`.
 - **Exactly one `# noqa` may exist in the tree** — `BLE001, S110` in `newsninja/audio/tts.py:231`. Do not add another.
@@ -22,7 +23,7 @@
 - **The existing 223 tests must pass unmodified.** If a task requires editing an existing test, the change altered behaviour and is wrong — stop and report rather than editing the test.
 - **`newsninja` must never import `evals`.** The dependency runs one way only.
 - **Run `git check-ignore -v <path>` before assuming any new file will be tracked.** The `.gitignore` is written around broad category excludes and has swallowed four legitimate source paths so far.
-- **Commit after every task.** Subagents have been killed mid-run by API stalls; incremental commits mean a stall cannot discard work.
+- **Commit after every task.** Long-running work has been interrupted mid-task before; incremental commits mean an interruption cannot discard work.
 
 ---
 
@@ -1018,7 +1019,7 @@ Create `api/newsninja/api/routes.py`:
 
 Split along seams the package already has, so no single request runs long
 enough for a platform proxy to sever it. See
-docs/superpowers/specs/2026-07-31-fastapi-service-design.md for the token
+docs/design/specs/2026-07-31-fastapi-service-design.md for the token
 arithmetic that forces this shape.
 
 Every handler is a plain ``def`` rather than ``async def``, so FastAPI runs it
@@ -1904,7 +1905,7 @@ preference: `openai/gpt-oss-20b` allows 8,000 tokens per minute, one topic
 reserves roughly 2,400, and five topics reserve 11,787 — so a five-topic request
 sits in the token limiter for 48 seconds and no free-tier proxy will hold the
 connection. Measured against `evals/data/corpus.jsonl`; see
-`docs/superpowers/specs/2026-07-31-fastapi-service-design.md`.
+`docs/design/specs/2026-07-31-fastapi-service-design.md`.
 
 | Endpoint | Purpose |
 | --- | --- |

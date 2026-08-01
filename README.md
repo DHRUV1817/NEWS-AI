@@ -116,13 +116,13 @@ api/
   README.md                 # package-level documentation (read this for the design detail)
 
 docs/
-  superpowers/specs/         # design docs
-  superpowers/plans/          # implementation plans
+  design/specs/         # design docs
+  design/plans/          # implementation plans
 ```
 
 `api/evals/` (evaluation harness) exists and is covered below. `api/newsninja/api.py`
 (FastAPI service) and `web/` (Next.js frontend) are referenced in the design docs
-under `docs/superpowers/specs/` but do not exist in the repository yet.
+under `docs/design/specs/` but do not exist in the repository yet.
 
 ## Design notes
 
@@ -186,7 +186,7 @@ does not exist. So this README makes no claims about accuracy, performance, or
 scale — there is nothing measured yet to cite.
 
 Not yet built: the FastAPI service and the Next.js frontend, designed in
-`docs/superpowers/specs/2026-07-31-newsninja-portfolio-design.md` but not
+`docs/design/specs/2026-07-31-newsninja-portfolio-design.md` but not
 implemented.
 
 ## License

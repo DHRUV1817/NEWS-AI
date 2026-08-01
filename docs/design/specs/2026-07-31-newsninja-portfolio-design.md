@@ -118,11 +118,11 @@ api/                        # Python 3.11+
 web/                        # Next.js 15 + TypeScript
   app/
   components/
-  styles/tokens.css         # Hallmark Cobalt tokens
+  styles/tokens.css         # Cobalt design tokens
 
 docs/
   evals/                    # committed eval reports
-  superpowers/specs/
+  design/specs/
 ```
 
 **Why the frontend is TypeScript and the backend stays Python.** The analysis layer,
@@ -279,7 +279,7 @@ decision into a defended one.
 
 ## 7. Frontend design
 
-Designed via the Hallmark skill. Pre-flight found no existing design system to preserve.
+Worked through a structured design pass. No existing design system to preserve.
 
 - **Genre** · modern-minimal. The brief fired both "AI tool" (atmospheric) and "API /
   developer tool" (modern-minimal); the technical tone resolved it. Atmospheric would read
@@ -302,7 +302,7 @@ docs; use case = run a live analysis, with eval proof one scroll away; tone = te
 ### Constraints held
 
 No fake browser chrome, phone frames, or mock IDE windows — the hero contains the real
-working tool, which satisfies Hallmark gate 47 by construction rather than by omission.
+working tool, which satisfies the no-fake-screenshots rule by construction rather than by omission.
 
 No invented metrics, testimonials, logo walls, or pricing tiers. A portfolio project has no
 customers, and fabricating them is precisely the tell this rebuild eliminates. The eval
@@ -368,11 +368,10 @@ without one.
 Frontend to Vercel. Backend to Hugging Face Spaces or Render free tier. `GROQ_API_KEY` and
 the Reddit credentials are set as host secrets, never committed.
 
-**Credential note:** the Groq key currently in `.env` was pasted into a chat transcript
+**Credential note:** the Groq key currently in `.env` was exposed outside the repository
 during design. It must be rotated at `console.groq.com` before the repository is made
-public. `.env` is confirmed gitignored (`.gitignore:6`), and `.agents/` plus
-`.claude/skills/` were added to `.gitignore` so installed agent skills do not ship in the
-repository.
+public. `.env` is confirmed gitignored (`.gitignore:6`), and local tooling directories are
+gitignored so nothing installed on a developer machine ships in the repository.
 
 ---
 

@@ -58,7 +58,7 @@ never entered git history (verified repeatedly). Do not read, print, or echo it.
 with **zero `type: ignore`** and exactly **one `# noqa`** (`BLE001, S110` on the
 intentional Orpheus fallback in `newsninja/audio/tts.py`). Preserve all three properties.
 
-Specs and plans live in `docs/superpowers/specs/` and `docs/superpowers/plans/`.
+Specs and plans live in `docs/design/specs/` and `docs/design/plans/`.
 
 ### Immediate next action
 
@@ -203,8 +203,8 @@ api/
 
 ## 7. Plan 3 — FastAPI service (merged)
 
-Spec: `docs/superpowers/specs/2026-07-31-fastapi-service-design.md`
-Plan: `docs/superpowers/plans/2026-07-31-fastapi-service.md`
+Spec: `docs/design/specs/2026-07-31-fastapi-service-design.md`
+Plan: `docs/design/plans/2026-07-31-fastapi-service.md`
 
 **The shape follows from one number, not from taste.** `openai/gpt-oss-20b` allows 8,000
 TPM; one topic reserves ~2,400; five reserve 11,787. The fourth topic blocks 48s inside
@@ -225,8 +225,8 @@ characters — derived from measuring a realistic five-topic run at 8,330.
 
 ## 8. Plan 4 — Frontend design (locked, not started)
 
-Designed via the **Hallmark** skill (installed at `.agents/skills/hallmark`, gitignored).
-Pre-flight cached in `.hallmark/preflight.json`. These picks are settled:
+Worked through a structured design pass; the cached pre-flight lives outside the repo.
+These picks are settled:
 
 - **Genre:** modern-minimal. The brief fired both "AI tool" (atmospheric) and "API/dev
   tool" (modern-minimal); the technical tone resolved it. Atmospheric would read as a
@@ -244,7 +244,7 @@ Pre-flight cached in `.hallmark/preflight.json`. These picks are settled:
 recruiters skimming in 60s plus engineers who open the evals and API docs; use case = run a
 live analysis with eval proof one scroll away; tone = technical.
 
-**Constraints Hallmark imposes:** no fake browser chrome or mockups — the hero holds the
+**Constraints the design imposes:** no fake browser chrome or mockups — the hero holds the
 real tool. No invented metrics, testimonials, logo walls, or pricing. All colour in OKLCH
 as named tokens in `web/styles/tokens.css`. Every interactive element ships all eight
 states. Verified at 320/375/414/768px.
