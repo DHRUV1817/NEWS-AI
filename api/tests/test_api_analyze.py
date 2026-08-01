@@ -166,3 +166,32 @@ def test_every_source_failing_is_still_a_200_with_an_empty_analysis(api_app, cli
     }
     assert set(body["source_errors"]) == {"google_news", "reddit"}
     assert body["skipped_sources"] == []
+
+
+def test_the_article_count_distinguishes_a_placeholder_from_a_verdict(api_app, client):
+    """No articles means no model call, and the analysis is a default.
+
+    extract_topic short-circuits an empty list to stance="neutral" with
+    confidence 0.0. Those are not findings, and a caller with no way to tell
+    them from a measured judgement will render a verdict nothing produced —
+    the same reason this project refuses to report 0.0 for an uncomputable
+    metric.
+    """
+    api_app.dependency_overrides[get_sources] = lambda: [
+        FakeSource("google_news", [])
+    ]
+    body = client.post("/analyze", json={"topic": "ai"}).json()
+
+    assert body["article_count"] == 0
+    # The placeholder still carries its defaults; the count is what makes them
+    # readable as defaults rather than as measurements.
+    assert body["analysis"]["confidence"] == 0.0
+    assert body["analysis"]["stance"] == "neutral"
+
+
+def test_the_article_count_reports_what_was_actually_read(api_app, client):
+    api_app.dependency_overrides[get_sources] = lambda: [
+        FakeSource("google_news", [_article(), _article(), _article()])
+    ]
+    body = client.post("/analyze", json={"topic": "ai"}).json()
+    assert body["article_count"] == 3

@@ -325,13 +325,19 @@ export default function Analyzer() {
 }
 
 function TopicResult({ data }: { data: AnalyzeResponse }) {
-  const { analysis, skipped_sources, source_errors } = data;
+  const { analysis, skipped_sources, source_errors, article_count } = data;
+  // No articles means no model call: the stance and confidence below are the
+  // placeholder's defaults, not findings, so the page must not present them as
+  // a judgement about the topic.
+  const measured = article_count > 0;
   return (
     <div className="topic">
       <div className="result__head">
         <h3 className="result__topic">{analysis.topic}</h3>
         <span className="tag">
-          {analysis.stance} · confidence {analysis.confidence.toFixed(2)}
+          {measured
+            ? `${analysis.stance} · confidence ${analysis.confidence.toFixed(2)} · ${article_count} articles`
+            : "no articles found · nothing was analysed"}
         </span>
       </div>
 

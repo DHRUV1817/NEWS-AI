@@ -14,8 +14,13 @@ function analysis(topic: string): ArticleAnalysis {
   };
 }
 
-function analyzed(topic: string) {
-  return { analysis: analysis(topic), source_errors: {}, skipped_sources: [] };
+function analyzed(topic: string, articleCount = 6) {
+  return {
+    analysis: analysis(topic),
+    source_errors: {},
+    skipped_sources: [],
+    article_count: articleCount,
+  };
 }
 
 function deps(over: Partial<RunDeps> = {}): RunDeps {

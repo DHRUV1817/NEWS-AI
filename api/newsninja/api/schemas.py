@@ -105,6 +105,11 @@ class AnalyzeRequest(BaseModel):
 
 class AnalyzeResponse(BaseModel):
     analysis: ArticleAnalysis
+    #: Articles the analysis was built from. Zero means no model call was made
+    #: and the analysis is a placeholder — its neutral stance and 0.0 confidence
+    #: are defaults, not findings. A client that renders them without checking
+    #: this shows a verdict nothing produced.
+    article_count: int = 0
     #: Sources that were tried and broke, by name.
     source_errors: dict[str, list[str]] = {}
     #: Sources that reported themselves unavailable and were never tried.

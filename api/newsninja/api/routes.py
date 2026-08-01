@@ -66,6 +66,7 @@ def analyze(
         analysis=outcome.analysis,
         source_errors=outcome.source_errors,
         skipped_sources=outcome.skipped_sources,
+        article_count=outcome.article_count,
     )
 
 
