@@ -310,6 +310,11 @@ datasets/
 !api/evals/data/
 !api/evals/data/**
 
+# The published eval report is the harness's own output, and the site builds
+# its numbers from the JSON. The blanket `*.json` rule above would drop it,
+# shipping a page that says "not run" in production while working locally.
+!docs/evals/latest.json
+
 # ...but never ignore project config / lockfiles that *.json above would swallow.
 # A gitignored package.json makes the frontend unbuildable on clone.
 !package.json

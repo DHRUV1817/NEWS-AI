@@ -6,6 +6,7 @@ numbers depend on how many labels a human actually reviewed, and judged numbers
 are one model's opinion of another's output.
 """
 
+from dataclasses import asdict
 from typing import Any
 
 from evals.agreement import AgreementMetrics
@@ -15,6 +16,30 @@ from evals.metrics import DeterministicMetrics
 
 def _fmt(value: float | None, digits: int = 2) -> str:
     return "unavailable" if value is None else f"{value:.{digits}f}"
+
+
+def report_payload(
+    deterministic: DeterministicMetrics,
+    agreement: AgreementMetrics,
+    judged: JudgedMetrics,
+    meta: dict[str, Any],
+) -> dict[str, Any]:
+    """The same numbers as the markdown, in a shape a program can read.
+
+    Anything that reads the markdown has to parse prose, and prose changes
+    whenever the wording improves. This is the contract for consumers — the
+    frontend renders from it, so a metric it has never measured stays ``None``
+    here and renders as unavailable there rather than arriving as a zero.
+    """
+    return {
+        "generated": meta.get("generated"),
+        "model": meta.get("model"),
+        "prompt_version": meta.get("prompt_version"),
+        "skipped_records": int(meta.get("skipped_records", 0) or 0),
+        "deterministic": asdict(deterministic),
+        "agreement": asdict(agreement),
+        "judged": asdict(judged),
+    }
 
 
 def render_report(
