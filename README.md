@@ -240,7 +240,7 @@ Built, tested, and measured:
 | Container | builds and serves; CI smoke-tests it on every push |
 | `web/` site | runs the service in the browser, renders the harness's numbers |
 
-347 tests, all offline — no test makes a network call. `ruff` clean.
+349 tests, all offline — no test makes a network call. `ruff` clean.
 `mypy --strict` clean across 37 files with zero `type: ignore` and exactly one
 `# noqa`, on the intentional Orpheus fallback. CI runs three jobs: the Python
 suite, a container build with a smoke test, and a site build that fails if the

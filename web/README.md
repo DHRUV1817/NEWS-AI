@@ -68,7 +68,7 @@ one at a time rather than colliding over a shared per-minute budget.
 
 Rendering is not tested. The page shows what the service returned and what the
 harness wrote; the behaviour worth protecting is the orchestration and the
-package underneath it, which has 347 tests of its own.
+package underneath it, which has its own suite.
 
 CI type checks, lints, tests, builds, and asserts the eval numbers actually
 reached the rendered HTML.
