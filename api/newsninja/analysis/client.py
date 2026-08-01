@@ -311,17 +311,27 @@ class GroqClient:
                     model=model, messages=messages, response_format=response_format
                 )
             except SchemaRejection as exc:
-                # The provider's own strict-schema check rejected the
-                # generation server-side — no content, no usage, so there is
-                # nothing to record or settle. This is the server-side twin of
-                # the ValidationError branch below: same retry budget, same
-                # correction-message shape, fed from the provider's message
-                # and the generation it refused instead of local parsing.
+                # The call happened and is billed — Groq generated tokens and
+                # then refused the response — so it counts, even though there
+                # is no usage dict to add: a 400 carries no token split, and
+                # that split is genuinely not knowable, so it is left at zero
+                # rather than guessed. (The reservation already booked an
+                # estimate for this attempt, and it stands for the window,
+                # per the comment above `_reserve`.)
+                self.usage.calls += 1
                 last_error = str(exc)
                 if attempt == max_retries:
                     break
-                messages = messages + [
-                    {"role": "assistant", "content": exc.failed_generation},
+                # No assistant turn when the provider's body carried no
+                # failed_generation — an empty one would just be a hollow
+                # turn; the correction message alone still carries the
+                # provider's error text.
+                correction: list[dict[str, str]] = []
+                if exc.failed_generation:
+                    correction.append(
+                        {"role": "assistant", "content": exc.failed_generation}
+                    )
+                correction.append(
                     {
                         "role": "user",
                         "content": (
@@ -329,8 +339,9 @@ class GroqClient:
                             f"following errors:\n{last_error}\n"
                             "Return corrected JSON matching the schema exactly."
                         ),
-                    },
-                ]
+                    }
+                )
+                messages = messages + correction
                 continue
 
             self._record(usage)

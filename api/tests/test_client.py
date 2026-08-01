@@ -163,6 +163,52 @@ def test_the_schema_rejection_retry_carries_the_failed_generation_and_message():
     ), "the retry must feed the provider's message back to the model"
 
 
+def test_a_rejected_generation_is_still_counted_as_a_billed_call():
+    """Groq generated tokens for the rejected attempt and then refused the
+    response — that is a real call, even though no usage comes back with a
+    400. Undercounting it would make evals/run.py's cost summary silently
+    under-report what a run actually spent."""
+    transport = StubTransport(
+        [
+            SchemaRejection("bad", failed_generation='{"name": "a"}'),
+            '{"name": "a", "score": 0.4}',
+        ]
+    )
+    client = GroqClient(api_key="test", transport=transport)
+
+    client.structured(model="openai/gpt-oss-20b", system="s", user="u", schema_model=Tiny)
+
+    assert client.usage.calls == 2, (
+        "both the rejected attempt and the successful retry were real calls"
+    )
+
+
+def test_a_rejection_with_no_failed_generation_does_not_send_an_empty_assistant_turn():
+    """A body missing ``failed_generation`` leaves ``exc.failed_generation ==
+    ""`` — the retry must still carry the correction, but not as a hollow
+    assistant turn with empty content."""
+    transport = StubTransport(
+        [
+            SchemaRejection("bad shape", failed_generation=""),
+            '{"name": "a", "score": 0.4}',
+        ]
+    )
+    client = GroqClient(api_key="test", transport=transport)
+
+    result = client.structured(
+        model="openai/gpt-oss-20b", system="s", user="u", schema_model=Tiny
+    )
+
+    assert result.score == 0.4
+    retry_messages = transport.requests[1]["messages"]
+    assert not any(
+        m["role"] == "assistant" and m["content"] == "" for m in retry_messages
+    ), "an empty failed generation must not be sent as an assistant turn"
+    assert any(
+        "bad shape" in m["content"] for m in retry_messages
+    ), "the provider's message must still reach the model"
+
+
 def test_structured_rejects_models_without_schema_support():
     client = GroqClient(api_key="test", transport=StubTransport([]))
     with pytest.raises(ValueError, match="does not support"):
