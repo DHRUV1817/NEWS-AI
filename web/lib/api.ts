@@ -56,6 +56,11 @@ export interface ArticleAnalysis {
 
 export interface AnalyzeResponse {
   analysis: ArticleAnalysis;
+  /** Articles the analysis was built from. Zero means no model call was made
+   *  and the analysis is a placeholder — its neutral stance and 0.0 confidence
+   *  are defaults, not findings. Rendering them without checking this shows a
+   *  verdict nothing produced. */
+  article_count: number;
   /** Sources that were tried and broke, by name. */
   source_errors: Record<string, string[]>;
   /** Sources that reported themselves unavailable and were never tried.

@@ -115,6 +115,11 @@ class TopicResult:
     analysis: ArticleAnalysis
     source_errors: dict[str, list[str]] = field(default_factory=dict)
     skipped_sources: list[str] = field(default_factory=list)
+    #: How many articles the analysis was built from. Zero means no model call
+    #: happened at all: ``extract_topic`` short-circuits an empty list to a
+    #: placeholder carrying ``stance="neutral"`` and ``confidence=0.0``, and
+    #: without this count a caller cannot tell that verdict from a measured one.
+    article_count: int = 0
 
 
 def analyze_topic(
@@ -148,6 +153,7 @@ def analyze_topic(
         analysis=extract_topic(client, topic, articles, cache=cache),
         source_errors=source_errors,
         skipped_sources=skipped_sources,
+        article_count=len(articles),
     )
 
 
