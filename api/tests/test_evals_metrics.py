@@ -128,3 +128,49 @@ def test_all_failed_results_report_unavailable_without_crashing():
     assert m.ungrounded_claim_rate is None
     assert m.mean_claims_per_topic is None
     assert m.mean_entities_per_topic is None
+    assert m.total_claims == 0
+    assert m.total_ungrounded_claims == 0
+
+
+def test_total_claims_counts_every_claim_actually_present():
+    result = ExtractionResult(
+        topic="ai", analysis=_analysis(["alpha", "beta", "gamma"]),
+        articles=[_article("alpha beta gamma appear here")], failed=False,
+    )
+    m = deterministic_metrics([result])
+    assert m.total_claims == 3
+    assert m.total_ungrounded_claims == 0
+
+
+def test_total_ungrounded_claims_counts_only_the_fabricated_ones():
+    result = ExtractionResult(
+        topic="ai", analysis=_analysis(["alpha", "never said this"]),
+        articles=[_article("alpha appears here")], failed=False,
+    )
+    m = deterministic_metrics([result])
+    assert m.total_claims == 2
+    assert m.total_ungrounded_claims == 1
+
+
+def test_total_claims_sums_across_topics_not_just_the_last_one():
+    a = ExtractionResult(topic="a", analysis=_analysis(["x", "y"]),
+                         articles=[_article("x y")], failed=False)
+    b = ExtractionResult(topic="b", analysis=_analysis(["z"]),
+                         articles=[_article("z")], failed=False)
+    m = deterministic_metrics([a, b])
+    assert m.total_claims == 3
+
+
+def test_total_claims_is_zero_not_none_when_no_claims_exist():
+    """A count is a fact even where the rate computed from it would be
+    meaningless: zero claims counted is true and reportable, unlike a zero
+    grounding rate, which would misrepresent an absence of evidence as a
+    measured finding."""
+    result = ExtractionResult(
+        topic="ai", analysis=_analysis([], entities=2),
+        articles=[_article("x")], failed=False,
+    )
+    m = deterministic_metrics([result])
+    assert m.grounding_rate is None
+    assert m.total_claims == 0
+    assert m.total_ungrounded_claims == 0
