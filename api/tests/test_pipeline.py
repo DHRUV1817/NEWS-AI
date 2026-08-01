@@ -2,7 +2,7 @@ import pytest
 
 from newsninja.errors import SourceError
 from newsninja.models import Article, ArticleAnalysis
-from newsninja.pipeline import run_pipeline
+from newsninja.pipeline import analyze_topic, run_pipeline
 
 
 class FakeSource:
@@ -331,6 +331,46 @@ def test_cli_uses_distinct_exit_codes_for_distinct_failures(monkeypatch):
     assert rate_limited == EXIT_RATE_LIMIT
     assert extraction == EXIT_EXTRACTION
     assert rate_limited != extraction
+
+
+def test_analyze_topic_returns_one_analysis():
+    result = analyze_topic(
+        "ai", [FakeSource("google_news", [_article()])], FakeClient()
+    )
+    assert result.analysis.topic == "ai"
+    assert result.source_errors == {}
+    assert result.skipped_sources == []
+
+
+def test_analyze_topic_records_a_failing_source_without_aborting():
+    result = analyze_topic(
+        "ai",
+        [
+            FakeSource("reddit", error=SourceError("reddit", "401")),
+            FakeSource("google_news", [_article()]),
+        ],
+        FakeClient(),
+    )
+    assert "reddit" in result.source_errors
+    assert result.skipped_sources == []
+
+
+def test_analyze_topic_keeps_skipped_apart_from_failed():
+    """A missing credential and a broken source are different facts.
+
+    Collapsing them would tell a visitor to debug a source that was never
+    tried, and hide one they could fix by supplying credentials.
+    """
+    result = analyze_topic(
+        "ai",
+        [
+            FakeSource("reddit", is_available=False),
+            FakeSource("google_news", [_article()]),
+        ],
+        FakeClient(),
+    )
+    assert result.skipped_sources == ["reddit"]
+    assert result.source_errors == {}
 
 
 def test_cli_reports_missing_credentials_without_traceback(capsys, monkeypatch):

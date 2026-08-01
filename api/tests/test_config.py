@@ -55,3 +55,43 @@ def test_env_example_documents_exactly_the_real_settings():
     config. Keep it mechanically in step with Settings."""
     expected = {name.upper() for name in Settings.model_fields}
     assert _documented_keys() == expected
+
+
+def test_service_settings_have_safe_defaults():
+    """Defaults must be safe to deploy without reading the docs first.
+
+    No origins means no cross-origin access rather than any; not trusting proxy
+    headers means a spoofed X-Forwarded-For cannot bypass the per-IP window.
+    """
+    settings = Settings()
+    assert settings.allowed_origins == []
+    assert settings.trust_proxy_headers is False
+    assert settings.api_max_wait_seconds == 5.0
+    assert settings.rate_limit_per_minute == 10
+
+
+def test_allowed_origins_reads_a_json_list_from_the_environment(monkeypatch):
+    monkeypatch.setenv("ALLOWED_ORIGINS", '["https://example.vercel.app"]')
+    assert Settings().allowed_origins == ["https://example.vercel.app"]
+
+
+def test_a_rate_limit_of_zero_is_refused_rather_than_disabling_the_window():
+    """"Set it to 0 to disable" is the natural guess, and it does the opposite.
+
+    RateLimiter refuses at `len(hits) >= 0` and then reads hits[0] from an empty
+    deque. That IndexError is raised inside the rate-limit middleware, where no
+    exception handler is reachable, so every request becomes a 500 with a
+    traceback. Refusing the value at load is the only place this can be caught.
+    """
+    with pytest.raises(ValidationError):
+        Settings(rate_limit_per_minute=0)
+
+
+def test_a_negative_rate_limit_is_refused():
+    with pytest.raises(ValidationError):
+        Settings(rate_limit_per_minute=-1)
+
+
+def test_a_rate_limit_of_one_is_accepted():
+    """The lowest meaningful setting must still load."""
+    assert Settings(rate_limit_per_minute=1).rate_limit_per_minute == 1

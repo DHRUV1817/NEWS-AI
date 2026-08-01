@@ -129,6 +129,104 @@ found no articles are skipped rather than extracted, and the report's header
 says how many were skipped so `Topics evaluated` can be reconciled against the
 corpus.
 
+## HTTP service
+
+```bash
+uv run --python 3.12 uvicorn newsninja.api:create_app --factory --reload
+```
+
+Interactive docs at `http://127.0.0.1:8000/docs`.
+
+The endpoints are split so no single request runs long. That is arithmetic, not
+preference: `openai/gpt-oss-20b` allows 8,000 tokens per minute, one topic
+reserves roughly 2,400, and five topics reserve 11,787 — so a five-topic request
+sits in the token limiter for 48 seconds and no free-tier proxy will hold the
+connection. Measured against `evals/data/corpus.jsonl`; see
+`docs/superpowers/specs/2026-07-31-fastapi-service-design.md`.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /health` | Liveness and package version. Never calls the model. |
+| `POST /analyze` | One topic in, one `ArticleAnalysis` out. |
+| `POST /brief` | 1–5 analyses in, one unified script out. |
+| `POST /audio` | A script in, audio bytes out. |
+
+A client makes N `/analyze` calls, then one `/brief`, then one `/audio`. Feed
+`/brief` the `analysis` object out of each `/analyze` response, not the response
+itself. `/brief` answers `{"briefing": {...}}`.
+
+Two bounds a caller meets as a `422`: `/brief` accepts at most 9,000 characters
+of analysis text across the whole request, and both `/brief` and `/audio` accept
+only the twelve language codes the speech layer supports — a code outside that
+set would be silently spoken in English, so it is refused instead.
+
+### Failures
+
+| Condition | Status |
+| --- | --- |
+| invalid request body | 422 |
+| token budget exhausted | 429, with `Retry-After` |
+| a source failed | 200, reported in `source_errors`; the briefing is degraded, not failed |
+| the model would not produce valid output | 502 |
+
+A source failing does not fail the request: `/analyze` catches `SourceError`
+per source and still returns its `ArticleAnalysis`, with the broken sources
+named in `source_errors` — even when every source fails, the response is a 200
+with an empty analysis rather than an error. A `502` handler for `SourceError`
+is still registered at the application level, but nothing on the `/analyze`
+path can currently raise one past that per-source catch, so a caller of this
+API will not see it.
+
+Every failure uses one envelope, including an invalid request body:
+
+```json
+{ "error": { "type": "rate_limit", "message": "…", "retry_after": 48.0 } }
+```
+
+An invalid request body carries the same envelope, with pydantic's per-field errors
+under `detail` instead of `retry_after`:
+
+```json
+{ "error": { "type": "invalid_request", "message": "…", "detail": [ ... ] } }
+```
+
+### What this does not do
+
+`/brief` renders whatever analyses it is given. The server holds no articles at
+that point and cannot check that quotes are verbatim, so the grounding guarantee
+belongs to `/analyze`, which produced them.
+
+The per-IP window is in-process: it resets on restart and does not hold across
+multiple instances. It bounds one client, not the shared token budget — the
+limiter's wait ceiling does that.
+
+`TRUST_PROXY_HEADERS` is off by default. Turning it on trusts the platform to
+overwrite `X-Forwarded-For`; on a platform that does not, the per-IP window
+becomes bypassable by setting the header.
+
+The response cache is an unbounded public write surface. `/analyze` writes one
+row per distinct topic, `Cache` has no TTL and no size cap, and nothing in the
+service calls `clear()` — so the SQLite file grows with the number of distinct
+topics anyone has ever asked for, and only deleting `CACHE_PATH` shrinks it.
+
+### Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `GROQ_API_KEY` | required | — |
+| `ALLOWED_ORIGINS` | `[]` | JSON list of browser origins |
+| `API_MAX_WAIT_SECONDS` | `5.0` | limiter wait before answering 429 |
+| `RATE_LIMIT_PER_MINUTE` | `10` | per-IP request ceiling; at least 1 |
+| `TRUST_PROXY_HEADERS` | `false` | read `X-Forwarded-For` |
+| `ENABLE_ORPHEUS` | `false` | ask for Orpheus speech instead of gTTS |
+
+`ENABLE_ORPHEUS` is the only variable that can change a response `Content-Type`.
+It changes what is *asked for*, not what comes back: every Orpheus failure falls
+back to gTTS, so `/audio` reports the media type of the bytes it actually
+produced — `audio/wav` only for a successful Orpheus call, `audio/mpeg`
+otherwise, including for the fallback. With the terms unaccepted that fallback
+is the live path.
+
 ## Not here yet
 
 No web UI. `api/evals/` (above) covers extraction quality; there is no
