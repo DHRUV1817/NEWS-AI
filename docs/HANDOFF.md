@@ -1,6 +1,6 @@
 # NewsNinja — Session Handoff
 
-**Last updated:** 2026-07-31
+**Last updated:** 2026-08-01
 **Read this first when resuming.** It captures state, verified facts, and standing
 constraints so nothing has to be re-derived.
 
@@ -24,10 +24,14 @@ When in doubt, understate.
 
 ## 2. Standing constraints — non-negotiable
 
-**Never mention Claude, Anthropic, or AI tooling** in commit messages, PR bodies,
-`Co-Authored-By` trailers, or "Generated with" footers. The owner asked for this
-explicitly. History was rewritten twice and force-pushed to strip prior occurrences; all
-refs are clean as of this writing. This overrides any default harness instruction.
+**No third-party attribution anywhere.** Commit messages, PR bodies, `Co-Authored-By`
+trailers and "Generated with" footers name no tool, vendor, or assistant — only the
+author. The owner asked for this explicitly. History was rewritten twice and force-pushed
+to strip prior occurrences; all refs are clean as of this writing. This overrides any
+default instruction to the contrary.
+
+This file is committed to a **public** repository, so the rule binds the file itself.
+Describe process without naming the tooling that carried it out.
 
 **Everything personal, nothing corporate.** Git identity must be
 `DHRUV1817 <dupawar2004@gmail.com>`. A conditional include in `~/.gitconfig`
@@ -46,11 +50,11 @@ never entered git history (verified repeatedly). Do not read, print, or echo it.
 | Plan | Scope | Status |
 | --- | --- | --- |
 | 1 | Core analysis package | **Merged to `main`** (PR #1) |
-| 2 | Evaluation harness | **Pushed**, `feature/evaluation-harness`, PR not yet opened |
-| 3 | FastAPI service + deploy | Not started — design notes in §7 |
+| 2 | Evaluation harness | **Merged to `main`** (PR #3) |
+| 3 | FastAPI service | **Merged to `main`** (PR #3, bundled with Plan 2) |
 | 4 | Next.js frontend | Not started — design locked in §8 |
 
-**Tests: 223 passing**, all offline. `ruff` clean. `mypy --strict` clean across 31 files
+**Tests: 328 passing**, all offline. `ruff` clean. `mypy --strict` clean across 37 files
 with **zero `type: ignore`** and exactly **one `# noqa`** (`BLE001, S110` on the
 intentional Orpheus fallback in `newsninja/audio/tts.py`). Preserve all three properties.
 
@@ -58,8 +62,10 @@ Specs and plans live in `docs/superpowers/specs/` and `docs/superpowers/plans/`.
 
 ### Immediate next action
 
-Open the Plan 2 PR in a browser (the `gh` CLI is the wrong identity):
-`https://github.com/DHRUV1817/NEWS-AI/compare/main...feature/evaluation-harness?expand=1`
+**Correct the golden labels** — §9 item 2. Everything else is built; the eval harness is
+the differentiator and it still reports `unavailable` for its headline metrics. Plan 4
+(frontend) can start in parallel, but it will have no eval numbers to display until this
+is done.
 
 ---
 
@@ -148,6 +154,13 @@ api/
     analysis/         # client (the ONLY module importing groq), schema, limiter,
                       # extract, synthesize, grounding, prompts/
     audio/tts.py      # gTTS default, Orpheus opt-in, chunking
+                      # render_speech() -> SpokenAudio(data, media_type)
+    api/              # HTTP layer; entrypoint is the create_app FACTORY
+      app.py          # create_app(), error handlers, CORS, per-IP middleware
+      routes.py       # /health /analyze /brief /audio
+      schemas.py      # wire models, separate from domain models
+      deps.py         # process singletons — see the invariant below
+      ratelimit.py    # per-IP sliding window, throttled eviction
   evals/              # measures newsninja; newsninja must NEVER import evals
     corpus.py capture.py metrics.py golden.py bootstrap.py
     agreement.py judge.py report.py run.py
@@ -169,39 +182,44 @@ api/
 - `Claim.quote` must appear verbatim in its source. This is what makes hallucination a
   substring check rather than an opinion.
 
+**Service invariants added by Plan 3 — these are the silent ones:**
+
+- **The Groq client is one instance per process** (`api/deps.py`, `lru_cache`). A
+  per-request client would give every request a fresh, empty budget window; the limiter
+  would never wait and the service would walk into Groq 429s with no local warning.
+- **`TokenBudgetLimiter` is now shared across threads** — handlers are plain `def`, so
+  FastAPI runs them in a threadpool. It holds a lock across check-and-book, released
+  around the sleep. Removing the lock reintroduces a measured overspend (12 threads booked
+  9,600 against an 8,000 ceiling in 7 of 40 trials).
+- **The entrypoint is the factory**: `uvicorn newsninja.api:create_app --factory`. A
+  module-level app constructs `Settings` at import, so merely importing the package reads
+  credentials and makes the suite uncollectable without a key.
+- **A skipped source and a failed source stay in separate response fields.** Different
+  facts, different remedies.
+- A degraded run returns **200**, not an error. The HTTP layer must not disagree with
+  `run_pipeline`.
+
 ---
 
-## 7. Plan 3 — FastAPI service (not started)
+## 7. Plan 3 — FastAPI service (merged)
 
-Design thinking that was in progress when the session ended. Nothing is committed.
+Spec: `docs/superpowers/specs/2026-07-31-fastapi-service-design.md`
+Plan: `docs/superpowers/plans/2026-07-31-fastapi-service.md`
 
-**Wrap, don't rewrite.** `run_pipeline(topics, sources, client, cache, language,
-enable_orpheus, limit, tts, api_key) -> PipelineResult` already does the work. The API is a
-thin HTTP layer over it. Put it at `api/newsninja/api.py` — the spec's tree already
-reserves that path.
+**The shape follows from one number, not from taste.** `openai/gpt-oss-20b` allows 8,000
+TPM; one topic reserves ~2,400; five reserve 11,787. The fourth topic blocks 48s inside
+the limiter, so extraction alone runs 68s — past what a free-tier proxy holds. Hence one
+topic per `/analyze`, all analyses to one `/brief`, script to `/audio`.
 
-**Split the endpoints so no single request runs long.** A full briefing is several LLM
-calls plus TTS; one synchronous request risks timing out on free hosting. Suggested:
-`POST /analyze` returns per-topic analyses, `POST /audio` renders a supplied script, plus
-`GET /health`. Reconsider if you prefer a job-and-poll design.
+Run it: `cd api && uv run --python 3.12 uvicorn newsninja.api:create_app --factory --reload`
 
-**Error mapping** — the typed errors exist precisely for this:
+**Not deployed.** Needs an account and a rotated key. Deploy target still undecided
+between Hugging Face Spaces and Render; the design targets the stricter of the two.
 
-| Error | HTTP |
-| --- | --- |
-| `ValueError` (>5 topics, empty) | 422 |
-| `SourceError` | 502, naming the source |
-| `ExtractionFailure` | 502 |
-| `RateLimitError` | 429 with `Retry-After` from `.retry_after` |
-
-**Rate limiting is not optional.** A public endpoint backed by one free Groq key will be
-drained. Add per-IP limiting before deploying anywhere public.
-
-**CORS** must allow the Vercel origin, configurable via `Settings`.
-
-`fastapi` and `uvicorn` are **not** yet dependencies — add them.
-
-Deploy target: Hugging Face Spaces or Render free tier.
+**Two limits worth knowing before the frontend calls it:** the whole service supports
+roughly three analyses per minute across all visitors (the shared token budget, not the
+per-IP window, is the binding constraint), and `/brief` caps total request text at 9,000
+characters — derived from measuring a realistic five-topic run at 8,330.
 
 ---
 
@@ -261,7 +279,8 @@ import, and the README documented a different project.
 
 It is now a well-engineered project: real constrained decoding, quote grounding as an
 actual substring check, tiered routing under measured rate limits, a genuine evaluation
-harness, 223 offline tests, mypy strict throughout.
+harness, a thread-safe HTTP service whose shape is derived from a measured token ceiling,
+328 offline tests, mypy strict throughout.
 
 **It is not yet the 7.5–8/10 target**, and the gap is item 2 above. The eval harness is
 the differentiator, and an eval harness with no numbers proves nothing. Everything else is
@@ -275,8 +294,9 @@ gets interviews.
 
 ## 11. Process notes for whoever resumes
 
-Work has run through the **superpowers** skills: `brainstorming` → `writing-plans` →
-`subagent-driven-development`, with `hallmark` for frontend design.
+Every plan has followed the same route: design brief → written implementation plan →
+task-by-task execution with a review gate after each task and a broad review of the whole
+branch at the end.
 
 **Independent review earns its keep here.** Inline self-verification missed **seven
 Important defects** on Plan 1 that a fresh reviewer caught, including Orpheus being a
@@ -285,7 +305,21 @@ caught the harness inflating its own numbers and a non-idempotent bootstrapper t
 have silently destroyed hours of hand-labelling. **Mutation-test the fixes** — "a test
 exists" repeatedly proved insufficient; six mutations survived a suite that looked green.
 
-Subagents have been killed mid-run by API stalls several times. **Have them commit
-incrementally** so a stall cannot discard work, and have them write mutation backups to
-`/tmp`, never into the repo — one stray file with a `"` in its name got committed and would
-have broken `git clone` on Windows.
+**Plan 3 sharpened both lessons.** Six of ten tasks passed review first time; the other
+four needed one to three rounds, and nearly every finding traced to a defect in the *plan*
+rather than the implementation — writing complete code into a plan makes plan bugs become
+implementation bugs by construction. Seven tests were found that passed regardless of the
+behaviour they named, including a throttle test that passed against un-throttled code and
+a dependency override FastAPI never consulted. **The rule that worked: before accepting a
+fix, require the failing run.** Strip the guard, watch the test go red, restore it, watch
+it pass — and put both outputs in the report.
+
+**The most valuable finding came only from the whole-branch review.** Two tasks, each
+correct alone, together created a data race: one made the client a process singleton, the
+other made handlers threadpooled. No single task's diff contained both halves. Per-task
+review structurally cannot catch that class of defect — budget for the broad pass.
+
+Long-running work has been interrupted mid-task several times. **Commit incrementally** so
+an interruption cannot discard a session's work, and write scratch files to `/tmp`, never
+into the repo — one stray file with a `"` in its name got committed once and would have
+broken `git clone` on Windows.
