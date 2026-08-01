@@ -43,12 +43,22 @@ class DeterministicMetrics:
     The two families therefore report different entity counts for identical
     data, on purpose: one asks how much the model said, the other how much of
     what it said was right.
+
+    ``total_claims`` and ``total_ungrounded_claims`` are the denominator and
+    numerator ``grounding_rate`` and ``ungrounded_claim_rate`` were divided
+    from. A rate is a fraction with the count discarded; a rate of 1.00 over
+    three claims and a rate of 1.00 over three thousand claims are not the
+    same finding, and only the count tells them apart. Unlike the rates,
+    these are never ``None`` — a count of zero claims is a true fact about
+    the run, not a missing measurement, so it is reported as ``0``.
     """
 
     topics_evaluated: int
     schema_valid_rate: float | None
     grounding_rate: float | None
     ungrounded_claim_rate: float | None
+    total_claims: int
+    total_ungrounded_claims: int
     mean_claims_per_topic: float | None
     mean_entities_per_topic: float | None
 
@@ -56,14 +66,14 @@ class DeterministicMetrics:
 def deterministic_metrics(results: list[ExtractionResult]) -> DeterministicMetrics:
     """Compute label-free metrics over extraction results."""
     if not results:
-        return DeterministicMetrics(0, None, None, None, None, None)
+        return DeterministicMetrics(0, None, None, None, 0, 0, None, None)
 
     succeeded = [r for r in results if not r.failed and r.analysis is not None]
     schema_valid_rate = len(succeeded) / len(results)
 
     if not succeeded:
         return DeterministicMetrics(
-            len(results), schema_valid_rate, None, None, None, None
+            len(results), schema_valid_rate, None, None, 0, 0, None, None
         )
 
     total_claims = 0
@@ -88,6 +98,8 @@ def deterministic_metrics(results: list[ExtractionResult]) -> DeterministicMetri
         schema_valid_rate=schema_valid_rate,
         grounding_rate=grounded,
         ungrounded_claim_rate=ungrounded,
+        total_claims=total_claims,
+        total_ungrounded_claims=total_ungrounded,
         mean_claims_per_topic=total_claims / len(succeeded),
         mean_entities_per_topic=total_entities / len(succeeded),
     )

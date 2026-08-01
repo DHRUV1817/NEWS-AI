@@ -51,9 +51,18 @@ def render_report(
             "output and its source articles."
         ),
         "",
+        (
+            "A quote is checked against each article's title and RSS summary "
+            "text, not its full prose: the free Google News RSS source this "
+            "harness reads from does not carry full article bodies. This "
+            "limits what \"grounded\" can mean here — see `Claims counted` "
+            "below for how much text that judgement rests on."
+        ),
+        "",
         "| Metric | Value |",
         "| --- | --- |",
         f"| Schema validity rate | {_fmt(deterministic.schema_valid_rate)} |",
+        f"| Claims counted | {deterministic.total_claims} |",
         f"| Quote grounding rate | {_fmt(deterministic.grounding_rate)} |",
         f"| Ungrounded claim rate | {_fmt(deterministic.ungrounded_claim_rate)} |",
         f"| Mean claims per topic | {_fmt(deterministic.mean_claims_per_topic, 1)} |",
