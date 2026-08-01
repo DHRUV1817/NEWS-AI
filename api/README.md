@@ -227,8 +227,47 @@ produced — `audio/wav` only for a successful Orpheus call, `audio/mpeg`
 otherwise, including for the fallback. With the terms unaccepted that fallback
 is the live path.
 
+## Container
+
+```bash
+cd api
+docker build -t newsninja-api .
+docker run -p 7860:7860 -e GROQ_API_KEY=... newsninja-api
+```
+
+Roughly 55 MB. Runs as uid 1000 — the uid Hugging Face Spaces requires — and
+listens on `$PORT`, defaulting to 7860 for Spaces; Render injects its own and
+that wins. Dependencies install from `uv.lock`, so the image gets the versions
+the test suite ran against rather than whatever is newest at build time.
+
+One worker deliberately. The token limiter's budget window is per process, so a
+second worker would double the effective spend against a single-key quota
+without either worker knowing it was happening.
+
+The SQLite response cache lives on container-local disk. Both free tiers give
+ephemeral storage, so it is a warm cache for the life of one container and
+nothing more — not durable state.
+
+### A health check that can pass while the service is broken
+
+`GET /health` deliberately never touches the model client, because a health
+check that spends tokens against an 8,000 TPM budget causes the outages it is
+meant to detect. The cost of that choice is real and worth knowing before you
+rely on it: if the client cannot be constructed at all — a bad key, an
+unreachable provider, a proxy variable the HTTP stack cannot parse — `/health`
+still answers `200` while every endpoint that does real work returns `500`.
+
+This is not hypothetical. Building this image surfaced exactly that shape:
+`no_proxy` carried an IPv6 CIDR, `httpx` raised `InvalidURL` while constructing
+the client, `/analyze` returned `500`, and `/health` stayed green throughout.
+Treat `/health` as a liveness probe only, and watch a real endpoint for
+readiness.
+
 ## Not here yet
 
 No web UI. `api/evals/` (above) covers extraction quality; there is no
 evaluation of synthesis, translation, or audio output yet. No test in this
 package makes a network call.
+
+Not deployed anywhere. The image builds and serves locally; choosing a platform
+and supplying a rotated key are the remaining steps.

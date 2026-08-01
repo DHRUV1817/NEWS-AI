@@ -1,0 +1,21 @@
+# The build needs the package, its lock file, and nothing else. Everything
+# below either bloats the image, slows the build, or must never reach it.
+
+.env
+.env.*
+!.env.example
+
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+tests/
+evals/
+htmlcov/
+.coverage
+*.mp3
+*.wav
