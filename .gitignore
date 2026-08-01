@@ -259,6 +259,9 @@ backups/
 Dockerfile.local
 docker-compose.override.yml
 .dockerignore
+# The service's build context is source, not local scratch. Without this the
+# rule above silently drops it and the image copies the venv and test tree.
+!api/.dockerignore
 
 # Cloud deployment
 .vercel/
