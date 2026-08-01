@@ -17,6 +17,20 @@ class ExtractionFailure(NewsNinjaError):
     """The model could not produce schema-valid output within the retry budget."""
 
 
+class SchemaRejection(NewsNinjaError):
+    """The provider rejected a generation against the strict schema.
+
+    Server-side counterpart to a local ValidationError: the model produced
+    JSON, the schema refused it, and no content came back. Carries the
+    offending generation so the retry can feed it to the model as a correction
+    rather than blindly resampling.
+    """
+
+    def __init__(self, message: str, failed_generation: str = "") -> None:
+        self.failed_generation = failed_generation
+        super().__init__(message)
+
+
 class RateLimitError(NewsNinjaError):
     """The provider's rate limit was hit. ``retry_after`` is in seconds."""
 
