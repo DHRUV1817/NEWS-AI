@@ -7,23 +7,30 @@ import {
   brief,
   ApiError,
   NetworkError,
+  LANGUAGES,
+  MAX_TOPICS,
   type AnalyzeResponse,
+  type ArticleAnalysis,
   type Briefing,
 } from "@/lib/api";
 
-/* The three calls are separate because the token budget makes them separate.
- * One topic reserves ~2,400 tokens against an 8,000-per-minute ceiling, so a
- * request that did all five topics at once would sit inside the limiter long
- * enough for a platform proxy to sever it. Showing the stages is honest about
- * that shape rather than hiding it behind one spinner. */
-type Stage = "idle" | "analyzing" | "briefing" | "speaking" | "done";
+/* One topic per /analyze call, then every analysis handed to /brief at once.
+ * That shape is the product: build_briefing writes across the analyses, so
+ * splitting them into separate briefs would return disconnected scripts rather
+ * than one briefing.
+ *
+ * Topics run one at a time rather than in parallel. The token budget is shared
+ * and per-minute, so firing five at once would not finish sooner — it would
+ * just collide, and the failures would be less legible. */
 
-const SUGGESTIONS = [
-  "artificial intelligence",
-  "renewable energy",
-  "space exploration",
-  "cryptocurrency",
-];
+type TopicStatus = "queued" | "running" | "done" | "failed";
+
+interface TopicRow {
+  topic: string;
+  status: TopicStatus;
+  result?: AnalyzeResponse;
+  error?: Failure;
+}
 
 interface Failure {
   kind: string;
@@ -31,48 +38,73 @@ interface Failure {
   retryAfter?: number;
 }
 
+type Phase = "idle" | "analyzing" | "briefing" | "speaking" | "done";
+
+const STARTERS = [
+  "artificial intelligence",
+  "renewable energy",
+  "space exploration",
+  "cryptocurrency",
+  "climate change",
+];
+
+function describe(error: unknown): Failure {
+  if (error instanceof ApiError) {
+    return { kind: error.kind, message: error.message, retryAfter: error.retryAfter };
+  }
+  if (error instanceof NetworkError) {
+    return { kind: "unreachable", message: error.message };
+  }
+  return {
+    kind: "unknown",
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
+
 export default function Analyzer() {
-  const [topic, setTopic] = useState("artificial intelligence");
-  const [stage, setStage] = useState<Stage>("idle");
-  const [result, setResult] = useState<AnalyzeResponse | null>(null);
+  const [topics, setTopics] = useState<string[]>(["artificial intelligence"]);
+  const [draft, setDraft] = useState("");
+  const [language, setLanguage] = useState("en");
+
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [rows, setRows] = useState<TopicRow[]>([]);
   const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [failure, setFailure] = useState<Failure | null>(null);
-  const [retryIn, setRetryIn] = useState<number | null>(null);
+  const [fatal, setFatal] = useState<Failure | null>(null);
+
   const objectUrl = useRef<string | null>(null);
 
-  // Revoke the previous blob before replacing it; a run per topic would
-  // otherwise leak one object URL per run for the life of the tab.
   useEffect(() => {
     return () => {
       if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
     };
   }, []);
 
-  const describe = useCallback((error: unknown): Failure => {
-    if (error instanceof ApiError) {
-      return {
-        kind: error.kind,
-        message: error.message,
-        retryAfter: error.retryAfter,
-      };
-    }
-    if (error instanceof NetworkError) {
-      return { kind: "unreachable", message: error.message };
-    }
-    return {
-      kind: "unknown",
-      message: error instanceof Error ? error.message : String(error),
-    };
+  const addTopic = useCallback(
+    (value: string) => {
+      const trimmed = value.trim();
+      if (!trimmed) return;
+      setTopics((current) => {
+        if (current.length >= MAX_TOPICS) return current;
+        // Duplicates would spend a call to say the same thing twice.
+        if (current.some((t) => t.toLowerCase() === trimmed.toLowerCase())) {
+          return current;
+        }
+        return [...current, trimmed];
+      });
+      setDraft("");
+    },
+    [],
+  );
+
+  const removeTopic = useCallback((value: string) => {
+    setTopics((current) => current.filter((t) => t !== value));
   }, []);
 
   const run = useCallback(async () => {
-    const trimmed = topic.trim();
-    if (!trimmed) return;
+    if (topics.length === 0) return;
 
-    setFailure(null);
-    setRetryIn(null);
-    setResult(null);
+    setFatal(null);
     setBriefing(null);
     if (objectUrl.current) {
       URL.revokeObjectURL(objectUrl.current);
@@ -80,31 +112,61 @@ export default function Analyzer() {
     }
     setAudioUrl(null);
 
-    try {
-      setStage("analyzing");
-      const analyzed = await analyze(trimmed);
-      setResult(analyzed);
+    const working: TopicRow[] = topics.map((topic) => ({ topic, status: "queued" }));
+    setRows(working);
+    setPhase("analyzing");
 
-      setStage("briefing");
-      const briefed = await brief([analyzed.analysis]);
+    /* A topic that fails does not abort the run. Five topics reserve more than
+     * the per-minute budget allows, so a later one refusing with a rate limit
+     * is an expected outcome, not a crash — the briefing is built from whatever
+     * succeeded, and the page says which did not. */
+    for (let i = 0; i < working.length; i += 1) {
+      working[i] = { ...working[i], status: "running" };
+      setRows([...working]);
+      try {
+        const result = await analyze(working[i].topic);
+        working[i] = { ...working[i], status: "done", result };
+      } catch (error) {
+        working[i] = { ...working[i], status: "failed", error: describe(error) };
+      }
+      setRows([...working]);
+    }
+
+    const analyses: ArticleAnalysis[] = working
+      .filter((row) => row.result)
+      .map((row) => row.result!.analysis);
+
+    if (analyses.length === 0) {
+      setFatal({
+        kind: "nothing_to_brief",
+        message:
+          "Every topic failed, so there is nothing to synthesise. The per-topic errors are listed above.",
+      });
+      setPhase("idle");
+      return;
+    }
+
+    try {
+      setPhase("briefing");
+      const briefed = await brief(analyses, language);
       setBriefing(briefed.briefing);
 
-      setStage("speaking");
+      setPhase("speaking");
       const spoken = await audio(briefed.briefing.script, briefed.briefing.language);
       const url = URL.createObjectURL(spoken.blob);
       objectUrl.current = url;
       setAudioUrl(url);
 
-      setStage("done");
+      setPhase("done");
     } catch (error) {
-      const described = describe(error);
-      setFailure(described);
-      setRetryIn(described.retryAfter ? Math.ceil(described.retryAfter) : null);
-      setStage("idle");
+      setFatal(describe(error));
+      setPhase("idle");
     }
-  }, [topic, describe]);
+  }, [topics, language]);
 
-  const busy = stage !== "idle" && stage !== "done";
+  const busy = phase !== "idle" && phase !== "done";
+  const succeeded = rows.filter((r) => r.status === "done").length;
+  const failed = rows.filter((r) => r.status === "failed").length;
 
   return (
     <div className="analyzer">
@@ -115,145 +177,196 @@ export default function Analyzer() {
           void run();
         }}
       >
-        <label className="analyzer__label" htmlFor="topic">
-          Topic
-        </label>
+        <div className="analyzer__topbar">
+          <label className="analyzer__label" htmlFor="topic">
+            Topics
+            <span className="analyzer__count">
+              {topics.length}/{MAX_TOPICS}
+            </span>
+          </label>
+          <label className="analyzer__label" htmlFor="language">
+            Language
+          </label>
+        </div>
+
         <div className="analyzer__row">
           <input
             id="topic"
             className="analyzer__input"
-            value={topic}
-            onChange={(event) => setTopic(event.target.value)}
-            placeholder="artificial intelligence"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                addTopic(draft);
+              }
+            }}
+            placeholder={
+              topics.length >= MAX_TOPICS
+                ? `${MAX_TOPICS} is the maximum`
+                : "Add a topic, then press Enter"
+            }
             maxLength={200}
-            disabled={busy}
+            disabled={busy || topics.length >= MAX_TOPICS}
             autoComplete="off"
             spellCheck={false}
           />
-          <button
-            className="btn btn--primary"
-            type="submit"
-            disabled={busy || !topic.trim()}
-            data-state={busy ? "loading" : undefined}
+          <select
+            id="language"
+            className="analyzer__select"
+            value={language}
+            onChange={(event) => setLanguage(event.target.value)}
+            disabled={busy}
           >
-            {busy ? "Working…" : "Run analysis"}
-          </button>
+            {LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.label}
+              </option>
+            ))}
+          </select>
         </div>
+
+        {topics.length > 0 && (
+          <ul className="picked">
+            {topics.map((topic) => (
+              <li key={topic} className="picked__item">
+                {topic}
+                <button
+                  type="button"
+                  className="picked__remove"
+                  onClick={() => removeTopic(topic)}
+                  disabled={busy}
+                  aria-label={`Remove ${topic}`}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
         <div className="analyzer__suggest">
-          {SUGGESTIONS.map((s) => (
+          {STARTERS.filter((s) => !topics.includes(s)).map((s) => (
             <button
               key={s}
               type="button"
               className="chip"
-              disabled={busy}
-              onClick={() => setTopic(s)}
+              disabled={busy || topics.length >= MAX_TOPICS}
+              onClick={() => addTopic(s)}
             >
-              {s}
+              + {s}
             </button>
           ))}
         </div>
+
+        <button
+          className="btn btn--primary analyzer__go"
+          type="submit"
+          disabled={busy || topics.length === 0}
+          data-state={busy ? "loading" : undefined}
+        >
+          {busy
+            ? "Working…"
+            : `Build briefing from ${topics.length} topic${topics.length === 1 ? "" : "s"}`}
+        </button>
+
+        {topics.length > 3 && !busy && (
+          <p className="analyzer__warn">
+            Four or more topics reserve more than the per-minute token budget
+            allows. Expect a later one to be refused — the briefing is built
+            from whatever succeeds.
+          </p>
+        )}
       </form>
 
       <ol className="stages" aria-live="polite">
-        <Stagelet label="Fetch + extract" active={stage === "analyzing"} done={!!result} note="1 model call" />
-        <Stagelet label="Synthesise script" active={stage === "briefing"} done={!!briefing} note="1–2 model calls" />
-        <Stagelet label="Render speech" active={stage === "speaking"} done={!!audioUrl} note="no model call" />
+        <Stagelet
+          label="Extract"
+          active={phase === "analyzing"}
+          done={succeeded > 0 && phase !== "analyzing"}
+          note={rows.length ? `${succeeded}/${rows.length}` : `${topics.length} calls`}
+        />
+        <Stagelet
+          label="Synthesise"
+          active={phase === "briefing"}
+          done={!!briefing}
+          note="one script, all topics"
+        />
+        <Stagelet
+          label="Speak"
+          active={phase === "speaking"}
+          done={!!audioUrl}
+          note="no model call"
+        />
       </ol>
 
-      {failure && (
+      {rows.length > 0 && (
+        <ul className="runlist">
+          {rows.map((row) => (
+            <li key={row.topic} className="runrow" data-status={row.status}>
+              <span className="runrow__dot" aria-hidden="true" />
+              <span className="runrow__topic">{row.topic}</span>
+              <span className="runrow__note">
+                {row.status === "queued" && "queued"}
+                {row.status === "running" && "running…"}
+                {row.status === "done" &&
+                  `${row.result!.analysis.key_claims.length} claim${
+                    row.result!.analysis.key_claims.length === 1 ? "" : "s"
+                  }`}
+                {row.status === "failed" && (
+                  <>
+                    {row.error!.kind}
+                    {row.error!.retryAfter
+                      ? ` · retry in ~${Math.ceil(row.error!.retryAfter)}s`
+                      : ""}
+                  </>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {failed > 0 && succeeded > 0 && phase === "done" && (
+        <p className="notice notice--info">
+          <span className="notice__kind">partial</span>
+          <span>
+            {succeeded} of {rows.length} topics made it into the briefing.
+            A refused topic is a budget limit, not a broken service.
+          </span>
+        </p>
+      )}
+
+      {fatal && (
         <div className="notice notice--error" role="alert">
-          <span className="notice__kind">{failure.kind}</span>
-          <p>{failure.message}</p>
-          {retryIn !== null && (
+          <span className="notice__kind">{fatal.kind}</span>
+          <p>{fatal.message}</p>
+          {fatal.retryAfter !== undefined && (
             <p className="notice__retry">
-              Budget frees in about <strong>{retryIn}s</strong>. The whole
-              service supports roughly three analyses per minute — that is the
+              Budget frees in about <strong>{Math.ceil(fatal.retryAfter)}s</strong>.
+              The whole service supports roughly three analyses per minute — the
               free-tier token ceiling, not a queue.
             </p>
           )}
         </div>
       )}
 
-      {result && (
+      {rows.some((r) => r.result) && (
         <div className="result">
-          <div className="result__head">
-            <h3 className="result__topic">{result.analysis.topic}</h3>
-            <span className="tag">
-              {result.analysis.stance} · confidence{" "}
-              {result.analysis.confidence.toFixed(2)}
-            </span>
-          </div>
-
-          <p className="result__summary">{result.analysis.summary}</p>
-
-          {result.analysis.entities.length > 0 && (
-            <ul className="entities">
-              {result.analysis.entities.map((entity) => (
-                <li key={`${entity.kind}-${entity.name}`} className="entity">
-                  {entity.name}
-                  <span className="entity__kind">{entity.kind}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className="claims">
-            <h4 className="claims__head">
-              Claims
-              <span className="claims__count">
-                {result.analysis.key_claims.length}
-              </span>
-            </h4>
-            {result.analysis.key_claims.length === 0 ? (
-              /* Zero claims is a result, not an empty state to apologise for.
-                 The prompt tells the model to omit any claim it cannot quote
-                 verbatim, and the feed carries headlines rather than prose. */
-              <p className="claims__empty">
-                No claim carried a span the model could quote verbatim, so it
-                returned none. The source feed supplies headlines, not article
-                text — see the measurement note below.
-              </p>
-            ) : (
-              <ul className="claims__list">
-                {result.analysis.key_claims.map((claim) => (
-                  <li key={claim.quote} className="claim">
-                    <p className="claim__text">{claim.text}</p>
-                    <blockquote className="claim__quote">
-                      {claim.quote}
-                    </blockquote>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          {(result.skipped_sources.length > 0 ||
-            Object.keys(result.source_errors).length > 0) && (
-            <div className="sources">
-              {result.skipped_sources.map((name) => (
-                <p key={name} className="notice notice--info">
-                  <span className="notice__kind">skipped</span>
-                  <span>
-                    <strong>{name}</strong> reported itself unavailable and was
-                    never tried — a missing credential, not a failure.
-                  </span>
-                </p>
-              ))}
-              {Object.entries(result.source_errors).map(([name, messages]) => (
-                <p key={name} className="notice notice--warn">
-                  <span className="notice__kind">failed</span>
-                  <span>
-                    <strong>{name}</strong> was tried and broke:{" "}
-                    {messages.join("; ")}
-                  </span>
-                </p>
-              ))}
-            </div>
-          )}
+          {rows
+            .filter((row) => row.result)
+            .map((row) => (
+              <TopicResult key={row.topic} data={row.result!} />
+            ))}
 
           {briefing && (
             <div className="script">
-              <h4 className="script__head">Briefing script</h4>
+              <h4 className="script__head">
+                Briefing script
+                <span className="script__topics">
+                  {briefing.topics.join(" · ")} · {briefing.language}
+                </span>
+              </h4>
               <p className="script__body">{briefing.script}</p>
             </div>
           )}
@@ -272,6 +385,72 @@ export default function Analyzer() {
   );
 }
 
+function TopicResult({ data }: { data: AnalyzeResponse }) {
+  const { analysis, skipped_sources, source_errors } = data;
+  return (
+    <div className="topic">
+      <div className="result__head">
+        <h3 className="result__topic">{analysis.topic}</h3>
+        <span className="tag">
+          {analysis.stance} · confidence {analysis.confidence.toFixed(2)}
+        </span>
+      </div>
+
+      <p className="result__summary">{analysis.summary}</p>
+
+      {analysis.entities.length > 0 && (
+        <ul className="entities">
+          {analysis.entities.map((entity) => (
+            <li key={`${entity.kind}-${entity.name}`} className="entity">
+              {entity.name}
+              <span className="entity__kind">{entity.kind}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="claims">
+        <h4 className="claims__head">
+          Claims<span className="claims__count">{analysis.key_claims.length}</span>
+        </h4>
+        {analysis.key_claims.length === 0 ? (
+          <p className="claims__empty">
+            No claim carried a span the model could quote verbatim, so it
+            returned none. The feed supplies headlines, not article prose.
+          </p>
+        ) : (
+          <ul className="claims__list">
+            {analysis.key_claims.map((claim) => (
+              <li key={claim.quote} className="claim">
+                <p className="claim__text">{claim.text}</p>
+                <blockquote className="claim__quote">{claim.quote}</blockquote>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {skipped_sources.map((name) => (
+        <p key={name} className="notice notice--info">
+          <span className="notice__kind">skipped</span>
+          <span>
+            <strong>{name}</strong> reported itself unavailable and was never
+            tried — a missing credential, not a failure.
+          </span>
+        </p>
+      ))}
+      {Object.entries(source_errors).map(([name, messages]) => (
+        <p key={name} className="notice notice--warn">
+          <span className="notice__kind">failed</span>
+          <span>
+            <strong>{name}</strong> was tried and broke: {messages.join("; ")}
+          </span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
 function Stagelet({
   label,
   active,
@@ -284,11 +463,7 @@ function Stagelet({
   note: string;
 }) {
   return (
-    <li
-      className="stage"
-      data-active={active || undefined}
-      data-done={done || undefined}
-    >
+    <li className="stage" data-active={active || undefined} data-done={done || undefined}>
       <span className="stage__dot" aria-hidden="true" />
       <span className="stage__label">{label}</span>
       <span className="stage__note">{note}</span>
