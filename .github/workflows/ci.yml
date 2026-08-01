@@ -44,55 +44,24 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      # Both counts are read from suite output, so a step that cannot read one
-      # prints what it actually saw. A parse that fails silently, or fails with
-      # only "exit 1", turns a wording change in someone else's tool into a
-      # mystery — which is the whole failure mode this job exists to prevent.
-      - name: Count the python suite
+      # Counts come from each runner's machine-readable report, not from its
+      # human-facing summary. Scraping that summary is what broke here once:
+      # it parsed locally and failed on the runner, because the line is
+      # formatted for people and formatting is allowed to change.
+      - name: Run the python suite
         working-directory: api
-        run: |
-          # Plain pytest, not pytest -q: pyproject already sets addopts = "-q",
-          # so a second -q suppresses the very summary line being read.
-          set +e
-          out=$(uv run --python 3.12 --extra dev pytest 2>&1)
-          rc=$?
-          set -e
-          if [ "$rc" -ne 0 ]; then
-            echo "pytest exited $rc"; echo "$out" | tail -30; exit 1
-          fi
-          n=$(printf '%s\n' "$out" | grep -oE '[0-9]+ passed' | tail -1 | grep -oE '^[0-9]+')
-          if [ -z "$n" ]; then
-            echo "could not read a test count from pytest output:"
-            printf '%s\n' "$out" | tail -30
-            exit 1
-          fi
-          echo "python suite: $n"
-          echo "PYTHON_TESTS=$n" >> "$GITHUB_ENV"
+        run: uv run --python 3.12 --extra dev pytest --junit-xml=/tmp/pytest.xml
         env:
           GROQ_API_KEY: test-key-not-real
 
-      - name: Count the site suite
+      - name: Run the site suite
         working-directory: web
         run: |
           npm ci
-          set +e
-          out=$(npm test 2>&1)
-          rc=$?
-          set -e
-          if [ "$rc" -ne 0 ]; then
-            echo "vitest exited $rc"; echo "$out" | tail -30; exit 1
-          fi
-          n=$(printf '%s\n' "$out" | grep -oE 'Tests[[:space:]]+[0-9]+ passed' | tail -1 | grep -oE '[0-9]+' | tail -1)
-          if [ -z "$n" ]; then
-            echo "could not read a test count from vitest output:"
-            printf '%s\n' "$out" | tail -30
-            exit 1
-          fi
-          echo "site suite: $n"
-          echo "SITE_TESTS=$n" >> "$GITHUB_ENV"
+          npx vitest run --reporter=json --outputFile=/tmp/vitest.json
 
       - name: The documentation states the counts the suites produce
-        run: python3 scripts/check-stated-test-count.py "$PYTHON_TESTS" "$SITE_TESTS"
+        run: python3 scripts/check-stated-test-count.py /tmp/pytest.xml /tmp/vitest.json
 
   # The suite cannot see container defects: it imports the package directly and
   # never builds an image. Writing the Dockerfile surfaced three failures that
