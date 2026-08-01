@@ -225,8 +225,9 @@ web/                    this page`}</code>
         <aside className="cta">
           <div className="shell cta__inner">
             <p className="cta__text">
-              The service is running locally on port 8000. Read the schema, or
-              read the code.
+              Every number on this page came from the harness, and every claim
+              in a briefing carries the span it was copied from. Read the
+              schema, or read the code.
             </p>
             <div className="cta__actions">
               <a className="btn btn--primary" href="#workbench">

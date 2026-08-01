@@ -1,36 +1,62 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Site
 
-## Getting Started
-
-First, run the development server:
+The page that runs the service. Next.js, TypeScript, no CSS framework — colour
+and type resolve through tokens in `styles/tokens.css`.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev          # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+It calls the HTTP service, so start that too:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+cd ../api
+uv run --python 3.12 uvicorn newsninja.api:create_app --factory --port 8000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Configuration
 
-## Learn More
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `NEXT_PUBLIC_API_URL` | `http://127.0.0.1:8000` | The service the page calls |
 
-To learn more about Next.js, take a look at the following resources:
+Copy `.env.local.example` to `.env.local` to change it. The variable is read at
+build time, so a deployed site must have it set before the build runs, not
+after.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## What the page reads at build time
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The evaluation section renders from `../docs/evals/latest.json`, which
+`python -m evals.run --report` writes. The page keeps no copy of those numbers —
+a hand-maintained duplicate is how a site ends up quoting a figure no run ever
+produced.
 
-## Deploy on Vercel
+If that file is absent the section says so and names the command. CI fails if a
+build publishes the fallback while the report is committed, so the page cannot
+quietly claim nothing has been measured.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Deploying
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Vercel, with **`web` as the root directory** — the repository holds the Python
+service at `api/` and this at `web/`.
+
+1. Import the repository, set Root Directory to `web`.
+2. Set `NEXT_PUBLIC_API_URL` to the deployed service's origin, no trailing slash.
+3. Deploy, then take the resulting origin and put it in the service's
+   `ALLOWED_ORIGINS` — the two point at each other, and the service refuses
+   cross-origin requests from anywhere it has not been told about.
+
+Order matters on the second half. `ALLOWED_ORIGINS` is empty by default, which
+means no cross-origin access rather than any; until the service names this
+origin the page loads and every call fails at the browser.
+
+The build reads `../docs/evals/latest.json` from the repository, so the report
+must be committed for the deployed page to show numbers. It is.
+
+## Not here
+
+No test suite for this half. The page is thin — it renders what the service
+returns and what the harness wrote — and the behaviour worth testing lives in
+the Python package, which has 347 tests. CI type checks, lints, builds, and
+asserts the eval numbers actually reached the rendered HTML.
