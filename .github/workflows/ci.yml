@@ -27,6 +27,46 @@ jobs:
         env:
           GROQ_API_KEY: test-key-not-real
 
+  # A test count in a README is a claim, and this project's premise is that
+  # every claim it makes is mechanically checkable. Left unchecked the number
+  # drifts on the first change that adds a test — it already had, across three
+  # files, in opposite directions. Runs both suites and compares.
+  stated-counts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Count the python suite
+        working-directory: api
+        run: |
+          # Plain pytest, not pytest -q: pyproject already sets addopts = "-q",
+          # so a second -q suppresses the very summary line being read.
+          n=$(uv run --python 3.12 --extra dev pytest 2>&1 \
+              | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+')
+          test -n "$n" || { echo "could not read a python test count"; exit 1; }
+          echo "PYTHON_TESTS=$n" >> "$GITHUB_ENV"
+        env:
+          GROQ_API_KEY: test-key-not-real
+
+      - name: Count the site suite
+        working-directory: web
+        run: |
+          npm ci --silent
+          n=$(npm test 2>&1 | grep -oE 'Tests +[0-9]+ passed' | grep -oE '[0-9]+')
+          test -n "$n" || { echo "could not read a site test count"; exit 1; }
+          echo "SITE_TESTS=$n" >> "$GITHUB_ENV"
+
+      - name: The documentation states the counts the suites produce
+        run: python3 scripts/check-stated-test-count.py "$PYTHON_TESTS" "$SITE_TESTS"
+
   # The suite cannot see container defects: it imports the package directly and
   # never builds an image. Writing the Dockerfile surfaced three failures that
   # only appear at build or start time — an empty virtualenv, a package copied

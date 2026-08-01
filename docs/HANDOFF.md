@@ -58,7 +58,7 @@ Also merged since: a container and a Render blueprint, CI jobs for the container
 the site, the eval report published as JSON and rendered by the page, and tests for the
 run's orchestration.
 
-**Tests: 347 Python + 14 site**, all offline — no test makes a network call. `ruff`
+**Tests: 349 Python + 14 site**, all offline — no test makes a network call. `ruff`
 clean. `mypy --strict` clean across 37 files with **zero `type: ignore`** and exactly
 **one `# noqa`** (`BLE001, S110` on the intentional Orpheus fallback in
 `newsninja/audio/tts.py`). Preserve all three properties.
