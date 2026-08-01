@@ -20,7 +20,7 @@ jobs:
         run: uv run --python 3.12 --extra dev ruff check .
 
       - name: Type check
-        run: uv run --python 3.12 --extra dev mypy newsninja
+        run: uv run --python 3.12 --extra dev mypy newsninja evals
 
       - name: Test
         run: uv run --python 3.12 --extra dev pytest --cov=newsninja --cov-report=term-missing
