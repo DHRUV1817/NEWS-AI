@@ -54,9 +54,21 @@ origin the page loads and every call fails at the browser.
 The build reads `../docs/evals/latest.json` from the repository, so the report
 must be committed for the deployed page to show numbers. It is.
 
-## Not here
+## Tests
 
-No test suite for this half. The page is thin — it renders what the service
-returns and what the harness wrote — and the behaviour worth testing lives in
-the Python package, which has 347 tests. CI type checks, lints, builds, and
-asserts the eval numbers actually reached the rendered HTML.
+```bash
+npm test
+```
+
+The run's orchestration lives in `lib/briefing.ts`, not in the component, so the
+part worth testing runs without a browser: that a refused topic does not take
+the run down with it, that the briefing is built from whatever survived, that an
+all-failed run never sends an empty list to the service, and that topics extract
+one at a time rather than colliding over a shared per-minute budget.
+
+Rendering is not tested. The page shows what the service returned and what the
+harness wrote; the behaviour worth protecting is the orchestration and the
+package underneath it, which has 347 tests of its own.
+
+CI type checks, lints, tests, builds, and asserts the eval numbers actually
+reached the rendered HTML.
